@@ -1,0 +1,19 @@
+[package]
+name = "moneycraft-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "moneycraft-cli"
+path = "src/main.rs"
+
+[dependencies]
+moneycraft-core = { path = "../moneycraft-core" }
+moneycraft-feed = { path = "../moneycraft-feed" }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+clap.workspace = true
+databasecraft-store.workspace = true
