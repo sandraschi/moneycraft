@@ -1,6 +1,7 @@
 //! MoneyCraft Native Desktop Studio.
 //!
 //! Visual financial terminal with Bloomberg Terminal grade time-series charting,
+//! Personal Wealth & Savings simulator for beginners (Girokonto, Festgeld, Bausparer, Inflation run-rate erosion),
 //! Global Indices desk (Dow Jones, S&P 500, Nasdaq, DAX, Nikkei, KOSPI, FTSE, Hang Seng),
 //! multi-symbol normalized comparison overlays, arbitrary date-range filtering,
 //! crypto derivatives intelligence (Hyperliquid funding arbitrage & liquidation heatmaps),
@@ -15,7 +16,7 @@
 
 use databasecraft_store::DatabaseStore;
 use eframe::egui::{self, Color32, Pos2, Rect, Stroke, Vec2};
-use moneycraft_core::{dispatch, Command, CONTROL_PORT};
+use moneycraft_core::{compute_personal_wealth_projection, dispatch, Command, PersonalWealthConfig, CONTROL_PORT};
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
@@ -23,6 +24,7 @@ use tokio::runtime::Runtime;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveWorkspace {
     Terminal,
+    PersonalWealth,
     MultiComparison,
     CryptoDerivatives,
     FantasyTrading,
@@ -63,6 +65,10 @@ pub struct MoneyCraftGui {
     pub active_workspace: ActiveWorkspace,
     pub selected_symbol: String,
     pub command_input: String,
+
+    // Personal Wealth Simulator Inputs (Beginner Financial Reality)
+    pub wealth_config: PersonalWealthConfig,
+    pub wealth_report: Option<Value>,
 
     // Bloomberg Charting Controls & Date Range
     pub chart_style: ChartStyle,
@@ -120,12 +126,28 @@ pub struct MoneyCraftGui {
 
 impl MoneyCraftGui {
     pub fn new(store: Arc<DatabaseStore>, runtime: Arc<Runtime>) -> Self {
+        let default_wealth_cfg = PersonalWealthConfig {
+            monthly_income_eur: 2000.0,
+            monthly_living_costs_eur: 1400.0,
+            checking_balance_eur: 4200.0,
+            festgeld_principal_eur: 15000.0,
+            festgeld_interest_rate_pct: 3.0,
+            festgeld_term_years: 3.0,
+            bausparer_monthly_deposit_eur: 100.0,
+            bausparer_balance_eur: 5400.0,
+            bausparer_interest_rate_pct: 1.5,
+            inflation_run_rate_pct: 3.8,
+            simulation_years: 5,
+        };
+
         let mut app = Self {
             store,
             runtime,
-            active_workspace: ActiveWorkspace::Terminal,
+            active_workspace: ActiveWorkspace::PersonalWealth,
             selected_symbol: "DJIA".to_string(),
             command_input: String::new(),
+            wealth_config: default_wealth_cfg,
+            wealth_report: None,
             chart_style: ChartStyle::Candlestick,
             date_preset: DateRangePreset::Month1,
             custom_bar_count: 60,
@@ -165,6 +187,7 @@ impl MoneyCraftGui {
             auth_input_pass: String::new(),
         };
 
+        app.run_wealth_simulation();
         app.fetch_market_feed();
         app.fetch_multi_comparison();
         app.fetch_derivatives();
@@ -172,6 +195,12 @@ impl MoneyCraftGui {
         app.fetch_paper_account();
         app.fetch_portfolio();
         app
+    }
+
+    pub fn run_wealth_simulation(&mut self) {
+        let rep = compute_personal_wealth_projection(&self.wealth_config);
+        self.wealth_report = Some(serde_json::to_value(&rep).unwrap_or(Value::Null));
+        self.status_message = "Personal wealth & inflation erosion simulation recalculated".to_string();
     }
 
     pub fn fetch_market_feed(&mut self) {
@@ -325,13 +354,24 @@ impl eframe::App for MoneyCraftGui {
                         self.fetch_derivatives();
                         ui.close();
                     }
-                    if ui.button("Refresh News Ticker").clicked() {
-                        self.fetch_news_ticker();
+                    if ui.button("Recalculate Wealth Simulation").clicked() {
+                        self.run_wealth_simulation();
                         ui.close();
                     }
                     ui.separator();
                     if ui.button("Exit").clicked() {
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                });
+
+                ui.menu_button("Personal Wealth", |ui| {
+                    if ui.button("💶 Beginner Wealth & Inflation Simulator").clicked() {
+                        self.active_workspace = ActiveWorkspace::PersonalWealth;
+                        ui.close();
+                    }
+                    if ui.button("💼 Sovereign Portfolio Ledger").clicked() {
+                        self.active_workspace = ActiveWorkspace::PortfolioLedger;
+                        ui.close();
                     }
                 });
 
@@ -391,22 +431,6 @@ impl eframe::App for MoneyCraftGui {
                     }
                 });
 
-                ui.menu_button("Indicators", |ui| {
-                    ui.checkbox(&mut self.show_sma20, "SMA 20 (Cyan)");
-                    ui.checkbox(&mut self.show_ema50, "EMA 50 (Gold)");
-                    ui.checkbox(&mut self.show_bollinger, "Bollinger Bands");
-                    ui.checkbox(&mut self.show_volume, "Volume Profile");
-                    ui.checkbox(&mut self.show_rsi, "RSI Oscillator");
-                });
-
-                ui.menu_button("View", |ui| {
-                    let theme_label = if self.is_dark_theme { "☀ Switch to Light Theme" } else { "🌙 Switch to Dark Theme" };
-                    if ui.button(theme_label).clicked() {
-                        self.is_dark_theme = !self.is_dark_theme;
-                        ui.close();
-                    }
-                });
-
                 ui.menu_button("Help", |ui| {
                     if ui.button("About MoneyCraft Bloomberg Terminal").clicked() {
                         self.show_about_dialog = true;
@@ -441,9 +465,6 @@ impl eframe::App for MoneyCraftGui {
                         let cur_price = summary["current_price"].as_f64().unwrap_or(0.0);
                         let change_pct = summary["change_24h_pct"].as_f64().unwrap_or(0.0);
                         let change_usd = summary["change_24h_usd"].as_f64().unwrap_or(0.0);
-                        let vwap = summary["vwap"].as_f64().unwrap_or(0.0);
-                        let high = summary["high_24h"].as_f64().unwrap_or(0.0);
-                        let low = summary["low_24h"].as_f64().unwrap_or(0.0);
                         let is_forex = summary["is_forex"].as_bool().unwrap_or(false);
                         let is_index = summary["is_index"].as_bool().unwrap_or(false);
                         let pip_precision = summary["pip_precision"].as_u64().unwrap_or(2) as usize;
@@ -463,11 +484,6 @@ impl eframe::App for MoneyCraftGui {
                         let sign = if change_pct >= 0.0 { "+" } else { "" };
                         let change_txt = format!("{sign}{change_usd:+.2} ({sign}{change_pct:.2}%)");
                         ui.colored_label(if change_pct >= 0.0 { green } else { red }, change_txt);
-
-                        ui.separator();
-                        ui.label(egui::RichText::new(format!("VWAP: {vwap:.4}")).weak().monospace());
-                        ui.label(egui::RichText::new(format!("24H HI: {high:.4}")).weak().monospace());
-                        ui.label(egui::RichText::new(format!("24H LO: {low:.4}")).weak().monospace());
                     }
                 }
 
@@ -536,7 +552,7 @@ impl eframe::App for MoneyCraftGui {
         });
 
         // 4. Navigation Rail
-        egui::Panel::left("finance_nav_rail").min_size(210.0).show(ui, |ui| {
+        egui::Panel::left("finance_nav_rail").min_size(220.0).show(ui, |ui| {
             ui.add_space(8.0);
             ui.strong(egui::RichText::new("TERMINAL FUNCTIONS").color(amber));
             ui.add_space(4.0);
@@ -546,6 +562,10 @@ impl eframe::App for MoneyCraftGui {
                 ui.selectable_label(active, rich).clicked()
             };
 
+            if nav_btn(ui, self.active_workspace == ActiveWorkspace::PersonalWealth, "💶 Personal Wealth & Inflation") {
+                self.active_workspace = ActiveWorkspace::PersonalWealth;
+                self.run_wealth_simulation();
+            }
             if nav_btn(ui, self.active_workspace == ActiveWorkspace::Terminal, "📊 Time-Series Terminal") {
                 self.active_workspace = ActiveWorkspace::Terminal;
                 self.fetch_market_feed();
@@ -590,18 +610,6 @@ impl eframe::App for MoneyCraftGui {
 
             ui.add_space(10.0);
             ui.separator();
-            ui.strong(egui::RichText::new("CRYPTO & PERPS").color(amber));
-            for sym in &["BTC/USD", "ETH/USD", "SOL/USD"] {
-                let is_sel = self.selected_symbol == *sym;
-                if ui.selectable_label(is_sel, *sym).clicked() {
-                    self.selected_symbol = sym.to_string();
-                    self.fetch_market_feed();
-                    self.fetch_derivatives();
-                }
-            }
-
-            ui.add_space(10.0);
-            ui.separator();
             ui.strong(egui::RichText::new("FOREX DESK").color(amber));
             for sym in &["EUR/USD", "USD/JPY", "GBP/USD", "USD/CNY", "EUR/GBP"] {
                 let is_sel = self.selected_symbol == *sym;
@@ -615,6 +623,7 @@ impl eframe::App for MoneyCraftGui {
 
         // 5. Central Panel
         egui::CentralPanel::default().show(ui, |ui| match self.active_workspace {
+            ActiveWorkspace::PersonalWealth => self.render_personal_wealth(ui),
             ActiveWorkspace::Terminal => self.render_bloomberg_terminal(ui),
             ActiveWorkspace::MultiComparison => self.render_multi_comparison(ui),
             ActiveWorkspace::CryptoDerivatives => self.render_crypto_derivatives(ui),
@@ -660,7 +669,8 @@ impl eframe::App for MoneyCraftGui {
                 .collapsible(false)
                 .resizable(false)
                 .show(ui.ctx(), |ui| {
-                    ui.heading("MoneyCraft Sovereign Terminal v0.5.0");
+                    ui.heading("MoneyCraft Sovereign Terminal v0.6.0");
+                    ui.label("Personal wealth & savings simulator (Girokonto, Festgeld 3%, Bausparer, Inflation run-rate erosion),");
                     ui.label("Bloomberg-grade financial analysis, high-density time-series charting,");
                     ui.label("Global Indices desk (Dow Jones, S&P 500, Nasdaq, DAX, Nikkei 225, KOSPI, FTSE, Hang Seng),");
                     ui.label("Multi-asset normalized comparison graph & arbitrary date-range presets (1D, 1W, 1M, 3M, YTD, 1Y),");
@@ -678,6 +688,198 @@ impl eframe::App for MoneyCraftGui {
 }
 
 impl MoneyCraftGui {
+    fn render_personal_wealth(&mut self, ui: &mut egui::Ui) {
+        let amber = Color32::from_rgb(255, 179, 0);
+        let green = Color32::from_rgb(0, 230, 118);
+        let red = Color32::from_rgb(255, 23, 68);
+        let cyan = Color32::from_rgb(0, 229, 255);
+
+        ui.heading(egui::RichText::new("💶 PERSONAL WEALTH, SAVINGS & INFLATION EROSION SIMULATOR").color(amber));
+        ui.label("Money for beginners: Visualize how inflation silently eats cash across checking accounts, fixed deposits, and Bausparer:");
+
+        ui.add_space(8.0);
+        let mut recompute = false;
+
+        // 1. Interactive Inputs Panel
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.strong(egui::RichText::new("YOUR PERSONAL ACCOUNTS & CASHFLOW").color(amber));
+            ui.columns(3, |cols| {
+                // Column 1: Monthly Cashflow
+                cols[0].label(egui::RichText::new("1. Monthly Cashflow").strong());
+                cols[0].horizontal(|ui| {
+                    ui.label("Monthly Income (In):");
+                    if ui.add(egui::DragValue::new(&mut self.wealth_config.monthly_income_eur).range(500.0..=20000.0).speed(50.0).suffix(" €")).changed() {
+                        recompute = true;
+                    }
+                });
+                cols[0].horizontal(|ui| {
+                    ui.label("Living Expenses (Out):");
+                    if ui.add(egui::DragValue::new(&mut self.wealth_config.monthly_living_costs_eur).range(200.0..=15000.0).speed(50.0).suffix(" €")).changed() {
+                        recompute = true;
+                    }
+                });
+                cols[0].horizontal(|ui| {
+                    ui.label("Checking (Girokonto):");
+                    if ui.add(egui::DragValue::new(&mut self.wealth_config.checking_balance_eur).range(0.0..=50000.0).speed(100.0).suffix(" €")).changed() {
+                        recompute = true;
+                    }
+                });
+
+                // Column 2: Fixed Income & Bausparer
+                cols[1].label(egui::RichText::new("2. Savings Products").strong());
+                cols[1].horizontal(|ui| {
+                    ui.label("Festgeld (Bound):");
+                    if ui.add(egui::DragValue::new(&mut self.wealth_config.festgeld_principal_eur).range(0.0..=200000.0).speed(500.0).suffix(" €")).changed() {
+                        recompute = true;
+                    }
+                });
+                cols[1].horizontal(|ui| {
+                    ui.label("Festgeld Rate / Term:");
+                    if ui.add(egui::DragValue::new(&mut self.wealth_config.festgeld_interest_rate_pct).range(0.1..=8.0).speed(0.1).suffix(" %")).changed() {
+                        recompute = true;
+                    }
+                    ui.label("for");
+                    if ui.add(egui::DragValue::new(&mut self.wealth_config.festgeld_term_years).range(1.0..=10.0).speed(1.0).suffix(" yrs")).changed() {
+                        recompute = true;
+                    }
+                });
+                cols[1].horizontal(|ui| {
+                    ui.label("Bausparer Deposit/mo:");
+                    if ui.add(egui::DragValue::new(&mut self.wealth_config.bausparer_monthly_deposit_eur).range(0.0..=500.0).speed(10.0).suffix(" €")).changed() {
+                        recompute = true;
+                    }
+                });
+                cols[1].horizontal(|ui| {
+                    ui.label("Bausparer Balance:");
+                    if ui.add(egui::DragValue::new(&mut self.wealth_config.bausparer_balance_eur).range(0.0..=100000.0).speed(250.0).suffix(" €")).changed() {
+                        recompute = true;
+                    }
+                });
+
+                // Column 3: The Inflation Monster
+                cols[2].label(egui::RichText::new("3. Macro Inflation Drag").strong());
+                cols[2].horizontal(|ui| {
+                    ui.label("Inflation Run Rate:");
+                    if ui.add(egui::DragValue::new(&mut self.wealth_config.inflation_run_rate_pct).range(0.5..=15.0).speed(0.1).suffix(" %")).changed() {
+                        recompute = true;
+                    }
+                });
+                cols[2].horizontal(|ui| {
+                    ui.label("Simulate Forward:");
+                    if ui.add(egui::Slider::new(&mut self.wealth_config.simulation_years, 1..=10).text("Years")).changed() {
+                        recompute = true;
+                    }
+                });
+            });
+        });
+
+        if recompute {
+            self.run_wealth_simulation();
+        }
+
+        ui.add_space(8.0);
+        if let Some(ref rep_val) = self.wealth_report {
+            let total_liq = rep_val["current_total_liquid_eur"].as_f64().unwrap_or(0.0);
+            let free_cf = rep_val["monthly_free_cashflow_eur"].as_f64().unwrap_or(0.0);
+            let annual_interest = rep_val["annual_nominal_interest_eur"].as_f64().unwrap_or(0.0);
+            let annual_inflation_drag = rep_val["annual_inflation_drag_eur"].as_f64().unwrap_or(0.0);
+            let net_real_yield = rep_val["net_real_yield_pct"].as_f64().unwrap_or(0.0);
+            let halve_years = rep_val["years_to_halve_purchasing_power"].as_f64().unwrap_or(0.0);
+
+            // 2. Big Numbers Diagnostic HUD
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(format!("CURRENT SAVINGS: {total_liq:.0} €")).size(15.0).strong());
+                    ui.separator();
+                    ui.colored_label(green, format!("MONTHLY SAVINGS FLOW: +{free_cf:.0} €/mo"));
+                    ui.separator();
+                    ui.label(format!("INTEREST EARNED: +{annual_interest:.0} €/yr"));
+                    ui.separator();
+                    ui.colored_label(red, format!("INFLATION EROSION: -{annual_inflation_drag:.0} €/yr"));
+                    ui.separator();
+
+                    let net_color = if net_real_yield >= 0.0 { green } else { red };
+                    ui.colored_label(net_color, format!("NET REAL RETURN: {net_real_yield:+.2}%"));
+                });
+            });
+
+            // 3. The Shocking Truth Callout Box
+            if net_real_yield < 0.0 {
+                ui.add_space(4.0);
+                egui::Frame::group(ui.style()).fill(Color32::from_rgb(32, 12, 16)).show(ui, |ui| {
+                    ui.colored_label(red, egui::RichText::new(format!("⚠️ INFLATION WARNING: Your capital is losing purchasing power at {net_real_yield:.2}% per year.")).strong());
+                    ui.label(format!("At this run-rate, your money's real purchasing power will be cut in half in {halve_years:.1} years (Rule of 72)."));
+                    ui.label("Your 3% Festgeld sounds safe, but inflation (3.8%) means you are guaranteed to end up poorer in real terms.");
+                });
+            }
+
+            ui.add_space(10.0);
+            // 4. Nominal vs Real Wealth Projections Table
+            ui.strong(egui::RichText::new("NOMINAL ILLUSION VS. REAL PURCHASING POWER (YEAR-BY-YEAR)").color(amber));
+            if let Some(proj) = rep_val["projections"].as_array() {
+                egui::Grid::new("wealth_proj_grid").striped(true).min_col_width(95.0).show(ui, |ui| {
+                    ui.strong("Year");
+                    ui.strong("Checking");
+                    ui.strong("Festgeld");
+                    ui.strong("Bausparer");
+                    ui.strong("Nominal Total (Bank App)");
+                    ui.strong("Real Value (True Goods)");
+                    ui.strong("Silent Inflation Loss");
+                    ui.strong("Value Kept");
+                    ui.strong("Real Monthly Income");
+                    ui.end_row();
+
+                    for p in proj {
+                        let y = p["year"].as_u64().unwrap_or(0);
+                        let chk = p["checking_eur"].as_f64().unwrap_or(0.0);
+                        let fest = p["festgeld_nominal_eur"].as_f64().unwrap_or(0.0);
+                        let bau = p["bausparer_nominal_eur"].as_f64().unwrap_or(0.0);
+                        let nom = p["total_nominal_wealth_eur"].as_f64().unwrap_or(0.0);
+                        let real = p["total_real_wealth_eur"].as_f64().unwrap_or(0.0);
+                        let loss = p["cumulative_inflation_loss_eur"].as_f64().unwrap_or(0.0);
+                        let ret = p["purchasing_power_retention_pct"].as_f64().unwrap_or(0.0);
+                        let m_real = p["monthly_purchasing_power_eur"].as_f64().unwrap_or(0.0);
+
+                        ui.label(format!("Year {y}"));
+                        ui.label(format!("{chk:.0} €"));
+                        ui.label(format!("{fest:.0} €"));
+                        ui.label(format!("{bau:.0} €"));
+                        ui.colored_label(cyan, format!("{nom:.0} €"));
+                        ui.colored_label(if real >= nom * 0.9 { green } else { amber }, format!("{real:.0} €"));
+                        ui.colored_label(red, format!("-{loss:.0} €"));
+                        ui.label(format!("{ret:.1}%"));
+                        ui.label(format!("{m_real:.0} €/mo"));
+                        ui.end_row();
+                    }
+                });
+            }
+
+            ui.add_space(12.0);
+            // 5. Educational Antidote Cards (Money for Beginners)
+            ui.strong(egui::RichText::new("SOLUTIONS: HOW TO DEFEND YOUR CAPITAL (ACTIONABLE ROADMAP)").color(green));
+            if let Some(tips) = rep_val["inflation_antidotes"].as_array() {
+                ui.horizontal(|ui| {
+                    for t in tips {
+                        let title = t["title"].as_str().unwrap_or("");
+                        let cat = t["category"].as_str().unwrap_or("");
+                        let exp = t["explanation"].as_str().unwrap_or("");
+                        let net_y = t["projected_real_yield_pct"].as_f64().unwrap_or(0.0);
+
+                        egui::Frame::group(ui.style()).show(ui, |ui| {
+                            ui.set_max_width(260.0);
+                            ui.label(egui::RichText::new(format!("[{cat}]")).color(amber).monospace());
+                            ui.strong(title);
+                            ui.label(exp);
+                            ui.separator();
+                            let col = if net_y >= 0.0 { green } else { red };
+                            ui.colored_label(col, format!("Estimated Real Yield: {net_y:+.1}%"));
+                        });
+                    }
+                });
+            }
+        }
+    }
+
     fn render_bloomberg_terminal(&mut self, ui: &mut egui::Ui) {
         let amber = Color32::from_rgb(255, 179, 0);
         let green = Color32::from_rgb(0, 230, 118);

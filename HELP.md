@@ -1,8 +1,8 @@
 # MoneyCraft Comprehensive User Guide & Reference Manual
 
 **MoneyCraft Sovereign Financial Intelligence Terminal**  
-**Version**: 0.5.0  
-**Domain**: Quantitative Finance, Global Indices Desk (Dow Jones, S&P 500, Nasdaq, DAX, Nikkei 225, KOSPI, FTSE, Hang Seng), Multi-Asset Comparison Graphs, Date-Range Presets (1D, 1W, 1M, 3M, YTD, 1Y), G10 Forex Desk, Crypto Derivatives (Hyperliquid Arbitrage & Liquidation Heatmaps), Fantasy Futures Paper Trading Sandbox, EVM Honeypot Defense, Sovereign Tax Accounting  
+**Version**: 0.6.0  
+**Domain**: Quantitative Finance, Personal Wealth & Inflation Simulator (Girokonto, Festgeld, Bausparer), Global Indices Desk (Dow Jones, S&P 500, Nasdaq, DAX, Nikkei 225, KOSPI, FTSE, Hang Seng), Multi-Asset Comparison Graphs, Date-Range Presets (1D, 1W, 1M, 3M, YTD, 1Y), G10 Forex Desk, Crypto Derivatives (Hyperliquid Arbitrage & Liquidation Heatmaps), Fantasy Futures Paper Trading Sandbox, EVM Honeypot Defense, Sovereign Tax Accounting  
 **Control Port**: `14117`
 
 ---
@@ -15,10 +15,11 @@ MoneyCraft is a sovereign, zero-subscription, local-first quantitative finance t
 
 ## 2. Competitive Matrix & Differentiation
 
-| Feature / Dimension | Bloomberg Terminal | TradingView / SeekingAlpha | Coinglass / Hyperliquid | Claude / General Chatbots | **MoneyCraft v0.5.0** |
+| Feature / Dimension | Bloomberg Terminal | TradingView / SeekingAlpha | Coinglass / Hyperliquid | Claude / General Chatbots | **MoneyCraft v0.6.0** |
 |---|---|---|---|---|---|
 | **Annual License Cost** | \$24,000 – \$32,000 / year | \$200 – \$720 / year + upsells | Free / Paid VIP Tiers | \$240 / year (No finance kernel) | **100% Free & Sovereign Open Source** |
 | **Data Privacy & Scraping** | Corporate surveillance | Telemetry monetized | Cloud RPC / logs | Cloud conversation logs | **Zero Telemetry (Local DatabaseCraft B-Tree)** |
+| **Personal Wealth & Inflation** | None (institutional focus) | None (trading only) | None | Static approximations | **Real Purchasing Power Calculator (Giro, Festgeld, Bausparer vs Inflation)** |
 | **High-Density Charting** | Classic Amber/Obsidian | WebGL / Browser Canvas | WebGL | None (Text / Static ASCII) | **Native High-FPS Immediate-Mode egui (stochastic drift)** |
 | **Multi-Asset Comparisons** | Normalized `%` return overlays | Compare tool (gated alerts) | Crypto only | None | **Dedicated Multi-Asset Normalized Return Graph (`0.0%` Baseline)** |
 | **Date Range Filters** | Standard intervals | Limited on free tier | Timeframe only | None | **Instant Range Switching (`1D`, `1W`, `1M`, `3M`, `YTD`, `1Y`)** |
@@ -82,6 +83,43 @@ MoneyCraft is a sovereign, zero-subscription, local-first quantitative finance t
 2. **PORT Macro Stress-Testing**: Central bank rate shock simulations and portfolio $\text{VaR}_{99}$.
 3. **NLP Sentiment Alpha Scorer**: News wire catalyst analysis.
 4. **Smart Order Routing (SOR)**: Slices blocks across dark pools and ECNs using adaptive VWAP.
+
+### 💶 Workspace 6: Personal Wealth & Inflation Erosion Simulator (`ActiveWorkspace::PersonalWealth`)
+*Designed specifically for individuals and beginners navigating savings accounts, fixed deposits, home-loan savings contracts, and the silent wealth tax of inflation.*
+
+- **The Problem It Solves ("The Bank App Illusion")**:
+  - Commercial bank apps display a growing nominal number (e.g., checking balance growing with salary deposits, a 3% Festgeld yielding 450 €/year). This creates a dangerous psychological sense of financial safety.
+  - In reality, with a 3.8% inflation run-rate, goods and living costs compound upwards faster than savings yield. A portfolio yielding 3.0% against 3.8% inflation has an effective **negative real yield of -0.8%**.
+- **Interactive Configuration Parameters**:
+  - **Monthly Net Income**: Default 2,000 €/mo.
+  - **Monthly Living Expenses**: Rent, food, utilities, subscriptions (default 1,400 €/mo).
+  - **Checking Account (Girokonto)**: Default 4,000 € balance (yielding 0.0% interest).
+  - **Festgeld (Time Deposit)**: Default 15,000 € principal bound for 3 years at 3.0% APR.
+  - **Bausparvertrag (Home-Savings)**: Default 100 €/mo contribution, 5,000 € current balance, 1.5% APR.
+  - **Inflation Run-Rate**: Adjustable macro inflation slider (1.0% to 10.0%, default 3.8%).
+  - **Simulation Horizon**: 1 to 10 years forward projection.
+- **Diagnostic HUD Metrics**:
+  - `CURRENT SAVINGS`: Sum of liquid cash, Festgeld principal, and Bausparer balance.
+  - `MONTHLY SAVINGS FLOW`: Unallocated cashflow added to Girokonto each month ($\text{Income} - \text{Expenses} - \text{Bausparer}$).
+  - `INTEREST EARNED`: Gross annual interest from Festgeld and Bausparer.
+  - `INFLATION EROSION`: Annual monetary purchasing power evaporated by inflation.
+  - `NET REAL RETURN`: True real interest rate ($\text{Yield} - \text{Inflation}$).
+- **The Rule of 72 Purchasing Power Halving Warning**:
+  - Automatically calculates when your savings will lose 50% of their real purchasing value:
+    $$\text{Years to Halve} = \frac{72}{\text{Inflation Rate}}$$
+  - At 3.8% inflation, your money buys half as much in **18.9 years**; at 6% inflation, in **12 years**.
+- **Nominal Illusion vs True Purchasing Power Grid**:
+  - Side-by-side year-by-year comparison contrasting:
+    - **Nominal Total**: What your bank app will show.
+    - **Real Value**: What those Euros will actually purchase in terms of groceries, rent, and energy ($P_{\text{real}} = P_{\text{nominal}} / (1 + i)^t$).
+    - **Silent Inflation Loss**: Cumulative Euros stolen by inflation.
+    - **Purchasing Power Retention**: Percentage of base year value retained.
+    - **Real Monthly Income**: Value of your initial 2,000 € monthly wage discounted forward.
+- **Actionable Beginner Defense Roadmap**:
+  1. **Emergency Cash Buffer (Notfallgroschen)**: Cap Girokonto strictly at 3–6 months living expenses (~4,500 € – 8,000 €).
+  2. **Tagesgeld & Money Market ETF (e.g. DBX0AN)**: Sweep excess checking cash into ECB overnight rate trackers yielding ~3.2% with daily liquidity.
+  3. **Global Equity ETF (MSCI World / FTSE All-World)**: Direct monthly savings into broad equities historically delivering 7.0%–8.5% nominal return (+3.5% real return after inflation).
+  4. **Physical Gold Bullion (XAU)**: Maintain 5%–10% allocation as a counter-fiat debasement hedge.
 
 ---
 

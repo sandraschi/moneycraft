@@ -4,12 +4,18 @@
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│               MONEYCRAFT SOVEREIGN TERMINAL v0.3.0                     │
+│               MONEYCRAFT SOVEREIGN TERMINAL v0.6.0                     │
 │                  Control Port: 14117 // Rust egui 0.37                 │
 ├────────────────────────────────────────────────────────────────────────┤
+│ 💶 Personal Wealth & Inflation| Girokonto, Festgeld, Bausparer vs Drag  │
+│ 🌐 Global Indices Desk      | DJIA, SPX, NDX, DAX, Nikkei, KOSPI, FTSE │
+│ 📈 Multi-Asset Comparison   | Normalized % Return Overlays (0.0% Base) │
+│ ⏱️ Date Range Presets       | 1D, 1W, 1M, 3M, YTD, 1Y Presets          │
 │ 📊 Time-Series Terminal     | 🕯️ Candlesticks, Mountain Area, Heikin-Ashi│
 │ 📈 Technical Indicators     | SMA 20, EMA 50, Bollinger Bands, Vol, RSI│
 │ 💱 Sovereign Forex Desk     | EUR/USD, USD/JPY, GBP/USD, USD/CNY, EUR/GBP│
+│ 🔥 Crypto Derivatives Desk  | Hyperliquid Funding Arbitrage & Liq Map  │
+│ 🎮 Fantasy Paper Trading    | 1x–50x Leverage Futures & Spot Sandbox   │
 │ ⚡ Breaking News Wire       | Real-time Macro/FX wire with NLP Sentiment│
 │ 🧠 Agentic AI Quant Workflows| Strategy Gen, PORT Stress-Test, Alpha, SOR│
 │ 🛡️ EVM Honeypot Auditor    | Local Sandbox bytecode scam analyzer      │
@@ -20,7 +26,21 @@
 
 ## Key Modules & Capabilities
 
-1. **Bloomberg-Grade Time-Series Charting**:
+1. **Beginner Personal Wealth & Inflation Erosion Simulator**:
+   - Compounding engine modeling monthly income (e.g. 2,000 €/mo), living expenses, Girokonto (0% interest), Festgeld (3.0% 3-year term), and Bausparvertrag (1.5% interest + monthly contributions).
+   - Real-time diagnostic HUD exposing interest earned vs inflation drag and net real yield.
+   - Rule of 72 halving alert showing years until real purchasing power is halved.
+   - Year-by-year table comparing nominal bank app balance against real purchasing power with cumulative silent inflation losses.
+   - Actionable beginner portfolio playbook (Emergency cash buffer, Geldmarkt-ETF DBX0AN, MSCI World ETF, and physical gold).
+
+2. **Global Market Indices Desk & Date Ranges**:
+   - Major world benchmarks: Dow Jones (`DJIA`), S&P 500 (`SPX`), Nasdaq-100 (`NDX`), DAX 40 (`DAX`), Nikkei 225 (`N225`), KOSPI (`KOSPI`), FTSE 100 (`FTSE`), and Hang Seng (`HSI`).
+   - One-click date range presets: `1D`, `1W`, `1M`, `3M`, `YTD`, and `1Y`.
+
+3. **Multi-Asset Normalized Return Comparison Graph**:
+   - Zero-baseline normalized percentage return curves allowing fair side-by-side comparison across assets of vastly different nominal scales (e.g. DJIA at 42,200 vs KOSPI at 2,580 vs EUR/USD at 1.0845).
+
+4. **Bloomberg-Grade Time-Series Charting**:
    - High-density 60-bar stochastic time-series canvas with true black obsidian background (`#06080c`).
    - Dynamic switching between standard candlesticks, filled mountain area curves, and smoothed Heikin-Ashi.
    - Built-in technical indicators: SMA 20, EMA 50, Bollinger Bands ribbon (2σ), Volume profile, and RSI 14 oscillator.

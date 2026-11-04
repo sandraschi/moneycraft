@@ -1,6 +1,7 @@
 //! MoneyCraft Core Library & Quantitative Command Bus.
 //!
 //! Event-driven backtesting, anti-scam auditing, position risk gates,
+//! personal wealth & savings simulator (Girokonto, Festgeld, Bausparer, Inflation run-rate erosion),
 //! global indices (Dow, S&P 500, Nasdaq, DAX, Nikkei, KOSPI, FTSE, Hang Seng),
 //! multi-symbol comparison overlays, arbitrary date-range filtering,
 //! crypto derivatives (liquidation heatmap & funding arbitrage),
@@ -17,7 +18,55 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 pub const CONTROL_PORT: u16 = 14117;
-pub const APP_VERSION: &str = "0.5.0";
+pub const APP_VERSION: &str = "0.6.0";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersonalWealthConfig {
+    pub monthly_income_eur: f64,        // e.g. 2000.0 EUR
+    pub monthly_living_costs_eur: f64,   // e.g. 1400.0 EUR
+    pub checking_balance_eur: f64,       // Girokonto e.g. 3500.0 EUR (0.0% interest)
+    pub festgeld_principal_eur: f64,     // Festgeld e.g. 15000.0 EUR
+    pub festgeld_interest_rate_pct: f64, // e.g. 3.0%
+    pub festgeld_term_years: f64,        // e.g. 3.0 years
+    pub bausparer_monthly_deposit_eur: f64, // Bausparer e.g. 100.0 EUR/mo
+    pub bausparer_balance_eur: f64,      // Current balance e.g. 4800.0 EUR
+    pub bausparer_interest_rate_pct: f64,// e.g. 1.5%
+    pub inflation_run_rate_pct: f64,     // e.g. 3.8%
+    pub simulation_years: usize,         // 1 to 10 years
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WealthYearProjection {
+    pub year: usize,
+    pub checking_eur: f64,
+    pub festgeld_nominal_eur: f64,
+    pub bausparer_nominal_eur: f64,
+    pub total_nominal_wealth_eur: f64,
+    pub total_real_wealth_eur: f64,       // Inflation-discounted purchasing power
+    pub cumulative_inflation_loss_eur: f64,
+    pub purchasing_power_retention_pct: f64,
+    pub monthly_purchasing_power_eur: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersonalWealthReport {
+    pub current_total_liquid_eur: f64,
+    pub monthly_free_cashflow_eur: f64,
+    pub annual_nominal_interest_eur: f64,
+    pub annual_inflation_drag_eur: f64,
+    pub net_real_yield_pct: f64,          // (Nominal - Inflation)
+    pub years_to_halve_purchasing_power: f64,
+    pub projections: Vec<WealthYearProjection>,
+    pub inflation_antidotes: Vec<WealthOptimizationTip>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WealthOptimizationTip {
+    pub title: String,
+    pub category: String, // "LIQUIDITY", "FIXED_INCOME", "GROWTH", "GOLD"
+    pub explanation: String,
+    pub projected_real_yield_pct: f64,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaperPosition {
@@ -58,6 +107,9 @@ pub enum Command {
     GetMultiSymbolFeed {
         symbols: Vec<String>,
         bar_count: Option<usize>,
+    },
+    SimulatePersonalWealth {
+        config: PersonalWealthConfig,
     },
     GetCryptoDerivativesFeed {
         symbol: String,
@@ -101,6 +153,98 @@ pub enum Command {
     PortfolioSummary,
 }
 
+pub fn compute_personal_wealth_projection(cfg: &PersonalWealthConfig) -> PersonalWealthReport {
+    let monthly_savings = (cfg.monthly_income_eur - cfg.monthly_living_costs_eur - cfg.bausparer_monthly_deposit_eur).max(0.0);
+    let current_total = cfg.checking_balance_eur + cfg.festgeld_principal_eur + cfg.bausparer_balance_eur;
+    let annual_interest = (cfg.festgeld_principal_eur * cfg.festgeld_interest_rate_pct / 100.0) 
+                        + (cfg.bausparer_balance_eur * cfg.bausparer_interest_rate_pct / 100.0);
+    let annual_inflation_drag = current_total * (cfg.inflation_run_rate_pct / 100.0);
+    let net_real_yield_pct = ((annual_interest - annual_inflation_drag) / current_total.max(1.0)) * 100.0;
+
+    let years_to_halve = if cfg.inflation_run_rate_pct > 0.0 {
+        72.0 / cfg.inflation_run_rate_pct
+    } else {
+        100.0
+    };
+
+    let mut projections = Vec::new();
+    let sim_years = cfg.simulation_years.clamp(1, 10);
+
+    let mut cur_checking = cfg.checking_balance_eur;
+    let mut cur_festgeld = cfg.festgeld_principal_eur;
+    let mut cur_bausparer = cfg.bausparer_balance_eur;
+
+    for y in 1..=sim_years {
+        // Checking account adds annual free cashflow (0% interest)
+        cur_checking += monthly_savings * 12.0;
+
+        // Festgeld accumulates compound interest (locked for term)
+        cur_festgeld *= 1.0 + (cfg.festgeld_interest_rate_pct / 100.0);
+
+        // Bausparer adds monthly deposits + 1.5% interest
+        cur_bausparer = (cur_bausparer + cfg.bausparer_monthly_deposit_eur * 12.0) * (1.0 + cfg.bausparer_interest_rate_pct / 100.0);
+
+        let total_nominal = cur_checking + cur_festgeld + cur_bausparer;
+
+        // Inflation discount factor: 1 / (1 + i)^y
+        let discount = 1.0 / (1.0 + cfg.inflation_run_rate_pct / 100.0).powi(y as i32);
+        let total_real = total_nominal * discount;
+        let cumulative_loss = total_nominal - total_real;
+        let retention_pct = (total_real / total_nominal) * 100.0;
+        let real_monthly_income = cfg.monthly_income_eur * discount;
+
+        projections.push(WealthYearProjection {
+            year: y,
+            checking_eur: cur_checking,
+            festgeld_nominal_eur: cur_festgeld,
+            bausparer_nominal_eur: cur_bausparer,
+            total_nominal_wealth_eur: total_nominal,
+            total_real_wealth_eur: total_real,
+            cumulative_inflation_loss_eur: cumulative_loss,
+            purchasing_power_retention_pct: retention_pct,
+            monthly_purchasing_power_eur: real_monthly_income,
+        });
+    }
+
+    let antidotes = vec![
+        WealthOptimizationTip {
+            title: "Emergency Cash Buffer (Notfallgroschen)".to_string(),
+            category: "LIQUIDITY".to_string(),
+            explanation: "Keep strictly 3-6 months living expenses on Girokonto (~4,500 - 8,000 EUR). Any surplus cash beyond this suffers 100% inflation erosion with 0% interest.".to_string(),
+            projected_real_yield_pct: -cfg.inflation_run_rate_pct,
+        },
+        WealthOptimizationTip {
+            title: "Tagesgeld & Money Market (Geldmarkt-ETF)".to_string(),
+            category: "FIXED_INCOME".to_string(),
+            explanation: "Move liquid cash over the buffer into ECB overnight rate trackers (e.g. DBX0AN yielding ~3.2%). Fully liquid daily, unlike 3-year locked Festgeld.".to_string(),
+            projected_real_yield_pct: 3.2 - cfg.inflation_run_rate_pct,
+        },
+        WealthOptimizationTip {
+            title: "All-World Equity Index (MSCI World / FTSE All-World)".to_string(),
+            category: "GROWTH".to_string(),
+            explanation: "Allocate monthly savings into a diversified global equity ETF. Historically delivers 7.0-8.5% nominal return, creating a net positive real return after inflation (+3.5% to +4.5%).".to_string(),
+            projected_real_yield_pct: 7.5 - cfg.inflation_run_rate_pct,
+        },
+        WealthOptimizationTip {
+            title: "Physical Gold & Sovereign Metals (XAU)".to_string(),
+            category: "GOLD".to_string(),
+            explanation: "Allocate 5-10% in physical gold bullion as an unprintable monetary hedge against long-term fiat purchasing power debasement.".to_string(),
+            projected_real_yield_pct: 5.0 - cfg.inflation_run_rate_pct,
+        },
+    ];
+
+    PersonalWealthReport {
+        current_total_liquid_eur: current_total,
+        monthly_free_cashflow_eur: monthly_savings,
+        annual_nominal_interest_eur: annual_interest,
+        annual_inflation_drag_eur: annual_inflation_drag,
+        net_real_yield_pct,
+        years_to_halve_purchasing_power: years_to_halve,
+        projections,
+        inflation_antidotes: antidotes,
+    }
+}
+
 pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
     match cmd {
         Command::Status => {
@@ -111,6 +255,7 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
                 "status": "ready",
                 "modules": [
                     "Bloomberg_Terminal_TimeSeries", "Technical_Indicators_SMA_EMA_BB_RSI_CVD",
+                    "Personal_Wealth_Inflation_Simulator_Giro_Festgeld_Bausparer",
                     "Global_Indices_Desk_DOW_SPX_NDX_DAX_NIKKEI_KOSPI_FTSE_HSI",
                     "Multi_Symbol_Normalized_Comparison_Graph",
                     "Arbitrary_Date_Range_Selector",
@@ -124,6 +269,13 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
                 ],
                 "supported_assets": ["Global_Indices", "Crypto", "Perpetual_Futures", "Forex", "Equities", "Commodities"],
                 "success": true
+            })
+        }
+        Command::SimulatePersonalWealth { config } => {
+            let report = compute_personal_wealth_projection(&config);
+            json!({
+                "success": true,
+                "report": report
             })
         }
         Command::GetMarketFeed { symbol, bar_count } => {

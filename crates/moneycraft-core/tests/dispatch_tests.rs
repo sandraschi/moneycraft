@@ -62,5 +62,29 @@ async fn test_moneycraft_market_feed_and_honeypot_auditor() -> Result<(), Box<dy
     assert!(bt_res["sharpe_ratio"].as_f64().unwrap_or(0.0) > 1.5);
     assert!(bt_res["max_drawdown_pct"].as_f64().unwrap_or(100.0) < 15.0);
 
+    // 5. Personal wealth and inflation erosion simulation (Checking, Festgeld, Bausparer)
+    let wealth_config = moneycraft_core::PersonalWealthConfig {
+        monthly_income_eur: 2000.0,
+        monthly_living_costs_eur: 1400.0,
+        checking_balance_eur: 4000.0,
+        festgeld_principal_eur: 15000.0,
+        festgeld_interest_rate_pct: 3.0,
+        festgeld_term_years: 3.0,
+        bausparer_monthly_deposit_eur: 100.0,
+        bausparer_balance_eur: 5000.0,
+        bausparer_interest_rate_pct: 1.5,
+        inflation_run_rate_pct: 3.8,
+        simulation_years: 5,
+    };
+    let sim_res = dispatch(Command::SimulatePersonalWealth { config: wealth_config }, &store).await;
+    assert_eq!(sim_res["success"], true);
+    let report = &sim_res["report"];
+    assert_eq!(report["current_total_liquid_eur"], 24000.0);
+    assert_eq!(report["monthly_free_cashflow_eur"], 500.0); // 2000 - 1400 - 100 bausparer
+    assert!(report["net_real_yield_pct"].as_f64().unwrap_or(0.0) < 0.0); // negative real return!
+    let projections = report["projections"].as_array().ok_or("missing projections")?;
+    assert_eq!(projections.len(), 5); // Year 1 to 5
+    assert!(projections[4]["cumulative_inflation_loss_eur"].as_f64().unwrap_or(0.0) > 0.0);
+
     Ok(())
 }

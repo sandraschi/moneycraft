@@ -50,6 +50,31 @@ enum Commands {
     },
     /// Inspect private sovereign portfolio PnL and active positions
     Portfolio,
+    /// Simulate personal wealth growth and real purchasing power erosion against inflation
+    SimulateWealth {
+        #[arg(long, default_value_t = 2000.0)]
+        income: f64,
+        #[arg(long, default_value_t = 1400.0)]
+        living_costs: f64,
+        #[arg(long, default_value_t = 4000.0)]
+        checking: f64,
+        #[arg(long, default_value_t = 15000.0)]
+        festgeld: f64,
+        #[arg(long, default_value_t = 3.0)]
+        festgeld_interest: f64,
+        #[arg(long, default_value_t = 3.0)]
+        festgeld_term: f64,
+        #[arg(long, default_value_t = 100.0)]
+        bausparer_monthly: f64,
+        #[arg(long, default_value_t = 5000.0)]
+        bausparer_balance: f64,
+        #[arg(long, default_value_t = 1.5)]
+        bausparer_interest: f64,
+        #[arg(long, default_value_t = 3.8)]
+        inflation: f64,
+        #[arg(long, default_value_t = 5)]
+        years: usize,
+    },
 }
 
 fn main() {
@@ -88,6 +113,35 @@ fn main() {
         }
         Some(Commands::Portfolio) => {
             let res = rt.block_on(dispatch(Command::PortfolioSummary, &store));
+            println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
+        }
+        Some(Commands::SimulateWealth {
+            income,
+            living_costs,
+            checking,
+            festgeld,
+            festgeld_interest,
+            festgeld_term,
+            bausparer_monthly,
+            bausparer_balance,
+            bausparer_interest,
+            inflation,
+            years,
+        }) => {
+            let cfg = moneycraft_core::PersonalWealthConfig {
+                monthly_income_eur: income,
+                monthly_living_costs_eur: living_costs,
+                checking_balance_eur: checking,
+                festgeld_principal_eur: festgeld,
+                festgeld_interest_rate_pct: festgeld_interest,
+                festgeld_term_years: festgeld_term,
+                bausparer_monthly_deposit_eur: bausparer_monthly,
+                bausparer_balance_eur: bausparer_balance,
+                bausparer_interest_rate_pct: bausparer_interest,
+                inflation_run_rate_pct: inflation,
+                simulation_years: years,
+            };
+            let res = rt.block_on(dispatch(Command::SimulatePersonalWealth { config: cfg }, &store));
             println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
         }
         None => {
@@ -170,7 +224,25 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
                                 "required": ["strategy"]
                             }
                         },
-                        { "name": "finance_portfolio", "description": "Inspect private sovereign portfolio PnL and active positions", "inputSchema": { "type": "object", "properties": {} } }
+                        { "name": "finance_portfolio", "description": "Inspect private sovereign portfolio PnL and active positions", "inputSchema": { "type": "object", "properties": {} } },
+                        {
+                            "name": "finance_simulate_personal_wealth",
+                            "description": "Simulate beginner personal wealth compounding across checking, festgeld, and bausparer vs true inflation erosion",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "income": { "type": "number", "description": "Monthly net income in EUR (e.g. 2000.0)" },
+                                    "living_costs": { "type": "number", "description": "Monthly living expenses in EUR (e.g. 1400.0)" },
+                                    "checking": { "type": "number", "description": "Current checking account balance (Girokonto) in EUR" },
+                                    "festgeld": { "type": "number", "description": "Festgeld principal in EUR" },
+                                    "festgeld_interest": { "type": "number", "description": "Festgeld annual interest rate % (e.g. 3.0)" },
+                                    "bausparer_monthly": { "type": "number", "description": "Monthly deposit into Bausparvertrag in EUR" },
+                                    "bausparer_balance": { "type": "number", "description": "Current Bausparer balance in EUR" },
+                                    "inflation": { "type": "number", "description": "Annual inflation run-rate % (e.g. 3.8)" },
+                                    "years": { "type": "integer", "description": "Simulation horizon in years (1 to 10)" }
+                                }
+                            }
+                        }
                     ]
                 }
             }),
@@ -198,6 +270,22 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
                         rt.block_on(dispatch(Command::RunBacktest { strategy: strat, symbol: sym, initial_capital: cap }, store))
                     }
                     "finance_portfolio" => rt.block_on(dispatch(Command::PortfolioSummary, store)),
+                    "finance_simulate_personal_wealth" => {
+                        let cfg = moneycraft_core::PersonalWealthConfig {
+                            monthly_income_eur: args["income"].as_f64().unwrap_or(2000.0),
+                            monthly_living_costs_eur: args["living_costs"].as_f64().unwrap_or(1400.0),
+                            checking_balance_eur: args["checking"].as_f64().unwrap_or(4000.0),
+                            festgeld_principal_eur: args["festgeld"].as_f64().unwrap_or(15000.0),
+                            festgeld_interest_rate_pct: args["festgeld_interest"].as_f64().unwrap_or(3.0),
+                            festgeld_term_years: args["festgeld_term"].as_f64().unwrap_or(3.0),
+                            bausparer_monthly_deposit_eur: args["bausparer_monthly"].as_f64().unwrap_or(100.0),
+                            bausparer_balance_eur: args["bausparer_balance"].as_f64().unwrap_or(5000.0),
+                            bausparer_interest_rate_pct: args["bausparer_interest"].as_f64().unwrap_or(1.5),
+                            inflation_run_rate_pct: args["inflation"].as_f64().unwrap_or(3.8),
+                            simulation_years: args["years"].as_u64().unwrap_or(5) as usize,
+                        };
+                        rt.block_on(dispatch(Command::SimulatePersonalWealth { config: cfg }, store))
+                    }
                     unknown => json!({ "success": false, "error": format!("Unknown tool '{unknown}'") })
                 };
 
