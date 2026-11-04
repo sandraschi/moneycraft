@@ -121,6 +121,21 @@ MoneyCraft is a sovereign, zero-subscription, local-first quantitative finance t
   3. **Global Equity ETF (MSCI World / FTSE All-World)**: Direct monthly savings into broad equities historically delivering 7.0%–8.5% nominal return (+3.5% real return after inflation).
   4. **Physical Gold Bullion (XAU)**: Maintain 5%–10% allocation as a counter-fiat debasement hedge.
 
+### 📡 Workspace 7: Market Data Sources & Exchange Payola Matrix (`ActiveWorkspace::DataSources`)
+*Instant toggling between air-gapped simulated models and live real-world public feeds, with transparent latency audits and commercial payola disclosures.*
+
+| Provider ID | Provider Name | Delay | Cost | Auth Required | Supported Assets | Why It's Free / Payola Reality |
+|---|---|---|---|---|---|---|
+| `synthetic` | **Synthetic Stochastic Model** | **0s Instant (0ms)** | **100% Free (\$0)** | None (Air-gapped) | All Global Tickers | Free forever. Runs 100% locally on your machine with zero tracking. |
+| `binance` | **Binance Public Market API** | **⚡ Real-Time (<150ms)** | **100% Free (\$0)** | None (Public REST) | BTC/USD, ETH/USD, SOL/USD | Crypto exchanges provide free public feeds to attract order flow. |
+| `hyperliquid` | **Hyperliquid L1 DEX** | **⚡ Real-Time (<120ms)** | **100% Free (\$0)** | None (Public L1 Node) | BTC, ETH, SOL, Perp Mark Px, Funding | Pure on-chain transparency. No paywall, no KYC, decentralized node. |
+| `yahoo` | **Yahoo Finance Feed** | **⏱️ 15-Min Delayed** | **100% Free (\$0)** | None (Public Web) | DJIA, SPX, DAX, KOSPI, Forex, Gold | Exchange regulations legally exempt 15-minute delayed data from royalties. |
+| `ecb` | **ECB Euro Foreign Exchange** | **📅 Daily (14:15 CET)** | **100% Free (\$0)** | None (Official SDMX) | EUR/USD, EUR/GBP, USD/JPY, CNY | Official sovereign benchmark fixing published daily by Eurosystem. |
+| `twelve_data` | **TwelveData / Finnhub** | **⚡ Real-Time (Rate-limited)** | Free Tier / \$29-\$79/mo | Free API Key | US Equities, Global Indices | Commercial aggregator; free tier provides 800 calls/day. |
+| `interactive_brokers` | **Interactive Brokers Gateway** | **⚡ Real-Time Sub-Second** | \$1.50–\$10/mo pass-through | Local Port `7496` | NYSE, NASDAQ, CME Futures | Bypasses \$24k Bloomberg licenses: IBKR passes through raw exchange fees directly. |
+| `polygon_io` | **Polygon.io / Tiingo SIP** | **⚡ Sub-Second WebSocket** | \$29–\$199/mo | Commercial API Key | US Equities, SIP Tape A/B/C | Bundles exchange redistributor licensing into a commercial developer SaaS. |
+| `bloomberg_bpipe` | **Bloomberg B-PIPE / Eikon** | **⚡ Sub-Millisecond** | \$2,000–\$2,700/mo | Leased Line Hardware | Institutional All-Asset | Wall Street financial cartel. Costs \$24k-\$32k/year per seat. |
+
 ---
 
 ## 4. Supported Global Market Tickers

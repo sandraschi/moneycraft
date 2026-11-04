@@ -100,13 +100,16 @@ pub struct PaperAccountState {
 #[serde(tag = "command", content = "params")]
 pub enum Command {
     Status,
+    ListDataSources,
     GetMarketFeed {
         symbol: String,
         bar_count: Option<usize>,
+        source: Option<String>,
     },
     GetMultiSymbolFeed {
         symbols: Vec<String>,
         bar_count: Option<usize>,
+        source: Option<String>,
     },
     SimulatePersonalWealth {
         config: PersonalWealthConfig,
@@ -259,6 +262,10 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
                     "Global_Indices_Desk_DOW_SPX_NDX_DAX_NIKKEI_KOSPI_FTSE_HSI",
                     "Multi_Symbol_Normalized_Comparison_Graph",
                     "Arbitrary_Date_Range_Selector",
+                    "Multi_Source_Market_Data_Switchable_Feed",
+                    "Real_Time_Crypto_Hyperliquid_Binance_L1",
+                    "Delayed_Real_World_TradFi_Yahoo_ECB",
+                    "Exchange_Payola_Transparency_Matrix",
                     "Forex_Currency_Desk_EUR_USD_JPY_GBP_CNY",
                     "Crypto_Derivatives_Liquidation_Heatmap",
                     "Hyperliquid_Funding_Rate_Arbitrage",
@@ -271,6 +278,14 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
                 "success": true
             })
         }
+        Command::ListDataSources => {
+            let sources = MarketFeed::list_data_sources();
+            json!({
+                "success": true,
+                "count": sources.len(),
+                "sources": sources
+            })
+        }
         Command::SimulatePersonalWealth { config } => {
             let report = compute_personal_wealth_projection(&config);
             json!({
@@ -278,32 +293,37 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
                 "report": report
             })
         }
-        Command::GetMarketFeed { symbol, bar_count } => {
+        Command::GetMarketFeed { symbol, bar_count, source } => {
             let count = bar_count.unwrap_or(60);
-            let candles = MarketFeed::mock_candles_with_count(&symbol, count);
-            let indicators = MarketFeed::calculate_indicators(&candles);
-            let summary = MarketFeed::summarize_ticker(&symbol, &candles);
+            let src = source.as_deref().unwrap_or("synthetic");
+            let fetch_res = MarketFeed::fetch_candles_with_source(&symbol, count, src).await;
+            let indicators = MarketFeed::calculate_indicators(&fetch_res.candles);
+            let summary = MarketFeed::summarize_ticker(&symbol, &fetch_res.candles);
 
             json!({
                 "success": true,
                 "symbol": symbol,
                 "summary": summary,
-                "bars_count": candles.len(),
-                "candles": candles,
+                "bars_count": fetch_res.candles.len(),
+                "candles": fetch_res.candles,
                 "indicators": indicators,
+                "source": fetch_res.source,
+                "status_note": fetch_res.status_note,
+                "is_live": fetch_res.is_live,
             })
         }
-        Command::GetMultiSymbolFeed { symbols, bar_count } => {
+        Command::GetMultiSymbolFeed { symbols, bar_count, source } => {
             let count = bar_count.unwrap_or(60);
+            let src = source.as_deref().unwrap_or("synthetic");
             let mut series = Vec::new();
 
             for sym in &symbols {
-                let candles = MarketFeed::mock_candles_with_count(sym, count);
-                let summary = MarketFeed::summarize_ticker(sym, &candles);
-                let first_close = candles.first().map(|c| c.close).unwrap_or(1.0);
+                let fetch_res = MarketFeed::fetch_candles_with_source(sym, count, src).await;
+                let summary = MarketFeed::summarize_ticker(sym, &fetch_res.candles);
+                let first_close = fetch_res.candles.first().map(|c| c.close).unwrap_or(1.0);
 
                 // Normalized percentage returns: ((price - p0) / p0) * 100
-                let normalized_returns: Vec<f64> = candles
+                let normalized_returns: Vec<f64> = fetch_res.candles
                     .iter()
                     .map(|c| ((c.close - first_close) / first_close) * 100.0)
                     .collect();
@@ -314,13 +334,16 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
                     "first_price": first_close,
                     "current_price": summary.current_price,
                     "normalized_pct_series": normalized_returns,
-                    "candles": candles
+                    "candles": fetch_res.candles,
+                    "status_note": fetch_res.status_note,
+                    "is_live": fetch_res.is_live,
                 }));
             }
 
             json!({
                 "success": true,
                 "count": symbols.len(),
+                "source": src,
                 "series": series
             })
         }

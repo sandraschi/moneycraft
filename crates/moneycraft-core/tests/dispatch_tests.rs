@@ -16,11 +16,27 @@ async fn test_moneycraft_status_and_control_port() -> Result<(), Box<dyn std::er
 async fn test_moneycraft_market_feed_and_honeypot_auditor() -> Result<(), Box<dyn std::error::Error>> {
     let store = DatabaseStore::open_in_memory()?;
 
-    // 1. Market feed query
-    let feed_res = dispatch(Command::GetMarketFeed { symbol: "BTC/USD".to_string(), bar_count: Some(60) }, &store).await;
+    // 1. Market feed query (Synthetic & Real sources)
+    let feed_res = dispatch(Command::GetMarketFeed { symbol: "BTC/USD".to_string(), bar_count: Some(60), source: None }, &store).await;
     assert_eq!(feed_res["success"], true);
     let candles = feed_res["candles"].as_array().ok_or("missing candles")?;
     assert!(candles.len() >= 4);
+
+    // 1b. Registry of Data Sources & Payola Tiers
+    let sources_res = dispatch(Command::ListDataSources, &store).await;
+    assert_eq!(sources_res["success"], true);
+    let sources_list = sources_res["sources"].as_array().ok_or("missing sources")?;
+    assert!(sources_list.len() >= 9);
+
+    // 1c. Binance public live feed test
+    let binance_res = dispatch(Command::GetMarketFeed { symbol: "BTC/USD".to_string(), bar_count: Some(30), source: Some("binance".to_string()) }, &store).await;
+    assert_eq!(binance_res["success"], true);
+    assert!(binance_res["candles"].as_array().ok_or("missing binance candles")?.len() >= 10);
+
+    // 1d. Yahoo Finance delayed index feed test
+    let yahoo_res = dispatch(Command::GetMarketFeed { symbol: "DJIA".to_string(), bar_count: Some(30), source: Some("yahoo".to_string()) }, &store).await;
+    assert_eq!(yahoo_res["success"], true);
+    assert!(yahoo_res["candles"].as_array().ok_or("missing yahoo candles")?.len() >= 5);
 
     // 2. Anti-scam honeypot audit on malicious contract
     let scam_audit = dispatch(

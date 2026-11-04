@@ -24,6 +24,7 @@ use tokio::runtime::Runtime;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveWorkspace {
     Terminal,
+    DataSources,
     PersonalWealth,
     MultiComparison,
     CryptoDerivatives,
@@ -69,6 +70,9 @@ pub struct MoneyCraftGui {
     // Personal Wealth Simulator Inputs (Beginner Financial Reality)
     pub wealth_config: PersonalWealthConfig,
     pub wealth_report: Option<Value>,
+
+    // Switchable Market Data Feed & Exchange Payola Options
+    pub active_data_source: String,
 
     // Bloomberg Charting Controls & Date Range
     pub chart_style: ChartStyle,
@@ -148,6 +152,7 @@ impl MoneyCraftGui {
             command_input: String::new(),
             wealth_config: default_wealth_cfg,
             wealth_report: None,
+            active_data_source: "synthetic".to_string(),
             chart_style: ChartStyle::Candlestick,
             date_preset: DateRangePreset::Month1,
             custom_bar_count: 60,
@@ -206,15 +211,18 @@ impl MoneyCraftGui {
     pub fn fetch_market_feed(&mut self) {
         let sym = self.selected_symbol.clone();
         let bars = self.custom_bar_count;
-        let res = self.runtime.block_on(dispatch(Command::GetMarketFeed { symbol: sym.clone(), bar_count: Some(bars) }, &self.store));
+        let src = self.active_data_source.clone();
+        let res = self.runtime.block_on(dispatch(Command::GetMarketFeed { symbol: sym.clone(), bar_count: Some(bars), source: Some(src.clone()) }, &self.store));
+        let note = res["status_note"].as_str().unwrap_or("Feed updated").to_string();
         self.market_data = Some(res);
-        self.status_message = format!("Bloomberg market feed updated for {sym} ({bars} bars)");
+        self.status_message = format!("[{src}] {note} for {sym} ({bars} bars)");
     }
 
     pub fn fetch_multi_comparison(&mut self) {
         let syms = self.comparison_symbols.clone();
         let bars = self.custom_bar_count;
-        let res = self.runtime.block_on(dispatch(Command::GetMultiSymbolFeed { symbols: syms, bar_count: Some(bars) }, &self.store));
+        let src = self.active_data_source.clone();
+        let res = self.runtime.block_on(dispatch(Command::GetMultiSymbolFeed { symbols: syms, bar_count: Some(bars), source: Some(src) }, &self.store));
         self.comparison_data = Some(res);
     }
 
@@ -570,6 +578,9 @@ impl eframe::App for MoneyCraftGui {
                 self.active_workspace = ActiveWorkspace::Terminal;
                 self.fetch_market_feed();
             }
+            if nav_btn(ui, self.active_workspace == ActiveWorkspace::DataSources, "📡 Data Sources & Payola") {
+                self.active_workspace = ActiveWorkspace::DataSources;
+            }
             if nav_btn(ui, self.active_workspace == ActiveWorkspace::MultiComparison, "📈 Multi-Asset Compare") {
                 self.active_workspace = ActiveWorkspace::MultiComparison;
                 self.fetch_multi_comparison();
@@ -625,6 +636,7 @@ impl eframe::App for MoneyCraftGui {
         egui::CentralPanel::default().show(ui, |ui| match self.active_workspace {
             ActiveWorkspace::PersonalWealth => self.render_personal_wealth(ui),
             ActiveWorkspace::Terminal => self.render_bloomberg_terminal(ui),
+            ActiveWorkspace::DataSources => self.render_data_sources_and_payola(ui),
             ActiveWorkspace::MultiComparison => self.render_multi_comparison(ui),
             ActiveWorkspace::CryptoDerivatives => self.render_crypto_derivatives(ui),
             ActiveWorkspace::FantasyTrading => self.render_fantasy_trading(ui),
@@ -880,6 +892,122 @@ impl MoneyCraftGui {
         }
     }
 
+    fn render_data_sources_and_payola(&mut self, ui: &mut egui::Ui) {
+        let amber = Color32::from_rgb(255, 179, 0);
+        let green = Color32::from_rgb(0, 230, 118);
+        let cyan = Color32::from_rgb(0, 229, 255);
+        let purple = Color32::from_rgb(179, 136, 255);
+
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.heading(egui::RichText::new("📡 MARKET DATA FEEDS, DELAY AUDITING & EXCHANGE PAYOLA MATRIX").color(amber));
+            ui.label("Sovereign financial transparency: switch between simulated models and real-world public feeds, audit latency delays, and bypass Wall Street exchange redistributor paywalls.");
+            ui.add_space(8.0);
+
+            // 1. Diagnostics HUD Bar
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(format!("ACTIVE PROVIDER: {}", self.active_data_source.to_uppercase())).strong().size(15.0));
+                    ui.separator();
+                    ui.colored_label(green, "YOUR DATA FEE: 0.00 € / month");
+                    ui.separator();
+                    ui.colored_label(cyan, "BLOOMBERG TERMINAL AVOIDED: +24,000 $ – 32,000 $ / year SAVED");
+                    ui.separator();
+                    if self.active_data_source == "synthetic" {
+                        ui.colored_label(cyan, "MODE: Air-Gapped Local Stochastic (0ms, 100% Offline)");
+                    } else if self.active_data_source == "yahoo" {
+                        ui.colored_label(amber, "MODE: Public Delayed TradFi (15-Min Lag, Real World)");
+                    } else {
+                        ui.colored_label(green, "MODE: Real-Time Live Feed Connected (<150ms)");
+                    }
+                });
+            });
+
+            ui.add_space(10.0);
+            ui.strong(egui::RichText::new("AVAILABLE DATA PROVIDERS & EXCHANGE TIERS (CLICK TO SWITCH)").color(amber));
+            ui.add_space(4.0);
+
+            let sources = moneycraft_feed::MarketFeed::list_data_sources();
+            egui::Grid::new("data_sources_grid").num_columns(3).spacing([12.0, 12.0]).show(ui, |ui| {
+                let mut col_count = 0;
+                for s in sources {
+                    let is_active = self.active_data_source.eq_ignore_ascii_case(&s.id);
+                    let border_color = if is_active { green } else { Color32::from_rgb(45, 55, 72) };
+
+                    egui::Frame::group(ui.style())
+                        .stroke(Stroke::new(if is_active { 2.0 } else { 1.0 }, border_color))
+                        .fill(if is_active { Color32::from_rgb(10, 24, 18) } else { Color32::from_rgb(14, 18, 26) })
+                        .show(ui, |ui| {
+                            ui.set_width(280.0);
+                            ui.set_height(260.0);
+
+                            ui.horizontal(|ui| {
+                                ui.strong(egui::RichText::new(&s.name).size(14.0));
+                                if is_active {
+                                    ui.colored_label(green, "[ACTIVE]");
+                                }
+                            });
+
+                            ui.horizontal(|ui| {
+                                let delay_color = if s.delay_seconds == 0 { green } else if s.delay_seconds <= 900 { amber } else { cyan };
+                                ui.colored_label(delay_color, &s.delay_label);
+                                ui.separator();
+                                let cost_color = if !s.is_payola { green } else { purple };
+                                ui.colored_label(cost_color, &s.cost_label);
+                            });
+
+                            ui.label(egui::RichText::new(format!("Auth: {}", s.auth_type)).small().monospace());
+                            ui.label(&s.description);
+                            ui.separator();
+                            ui.label(egui::RichText::new(&s.payola_breakdown).small().color(Color32::from_rgb(160, 174, 192)));
+
+                            ui.add_space(4.0);
+                            if is_active {
+                                ui.colored_label(green, "✓ Currently Feeding Terminal & Compare");
+                            } else {
+                                let btn_label = if s.is_payola {
+                                    format!("⚡ Test / Select {}", s.name)
+                                } else {
+                                    format!("⚡ Switch to {}", s.name)
+                                };
+                                if ui.button(btn_label).clicked() {
+                                    self.active_data_source = s.id.clone();
+                                    self.fetch_market_feed();
+                                    self.fetch_multi_comparison();
+                                }
+                            }
+                        });
+
+                    col_count += 1;
+                    if col_count % 3 == 0 {
+                        ui.end_row();
+                    }
+                }
+            });
+
+            ui.add_space(16.0);
+            // 3. Deep Dive Educational Guide on Exchange Payola
+            egui::Frame::group(ui.style()).fill(Color32::from_rgb(12, 16, 24)).show(ui, |ui| {
+                ui.strong(egui::RichText::new("📖 THE EXCHANGE DATA MONOPOLY EXPLAINED (WHY MARKET DATA COSTS MONEY)").color(cyan).size(15.0));
+                ui.add_space(6.0);
+
+                ui.label(egui::RichText::new("1. The TradFi Exchange Monopoly (NYSE, NASDAQ, CME Group, Deutsche Börse):").strong());
+                ui.label("Under US and European law, traditional exchanges own proprietary copyright over the bid/ask prices generated by market participants. They bundle this data into private feeds (e.g., NASDAQ TotalView, NYSE OpenBook) and charge monthly redistribution fees to every software vendor, broker, and trader.");
+                ui.add_space(4.0);
+
+                ui.label(egui::RichText::new("2. The 15-Minute Exemption:").strong());
+                ui.label("By regulatory mandate, quotes and trades delayed by 15 minutes are considered public historical information and are exempt from direct redistributor royalties. This is how Yahoo Finance, Google Finance, and MoneyCraft provide 100% free delayed global equity indices (Dow Jones, S&P 500, DAX, KOSPI).");
+                ui.add_space(4.0);
+
+                ui.label(egui::RichText::new("3. Why Crypto Feeds Are 100% Free:").strong());
+                ui.label("In decentralized crypto and derivative markets (Binance, Hyperliquid, Bybit), revenue is generated purely on trading execution fees. To maximize liquidity and algorithmic arbitrage, they broadcast ultra-low-latency real-time WebSockets and REST APIs for free with zero authentication.");
+                ui.add_space(4.0);
+
+                ui.label(egui::RichText::new("4. How Sovereign Quants Beat the $30,000 Bloomberg Cartel:").strong());
+                ui.label("Professional retail quants combine: (a) Hyperliquid/Binance for real-time crypto perps ($0), (b) Yahoo Finance & ECB for macro reference ($0), and (c) Interactive Brokers Gateway for real-time TradFi — paying only the raw exchange pass-through fee ($1.50/month for OPRA US Equity Options, $1.25/month for Network A/B) via local port 7496, saving 99% compared to Wall Street institutional licenses.");
+            });
+        });
+    }
+
     fn render_bloomberg_terminal(&mut self, ui: &mut egui::Ui) {
         let amber = Color32::from_rgb(255, 179, 0);
         let green = Color32::from_rgb(0, 230, 118);
@@ -887,6 +1015,71 @@ impl MoneyCraftGui {
         let cyan = Color32::from_rgb(0, 229, 255);
         let gold = Color32::from_rgb(255, 214, 0);
         let purple = Color32::from_rgb(179, 136, 255);
+
+        // Top Toolbar: Data Feed Source Selector & Real/Delayed Status
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("📡 FEED SOURCE:").color(amber).monospace().strong());
+            let current_source_name = match self.active_data_source.as_str() {
+                "binance" => "⚡ Binance (Live 0s, $0)",
+                "hyperliquid" => "⚡ Hyperliquid L1 (Live 0s, $0)",
+                "yahoo" => "⏱️ Yahoo Finance (15m Delay, $0)",
+                "ecb" => "📅 ECB Reference (Daily, $0)",
+                "twelve_data" => "⚡ TwelveData (Pro API Key)",
+                "interactive_brokers" => "⚡ IBKR Gateway (Local:7496)",
+                "polygon_io" => "⚡ Polygon.io SIP ($29/mo)",
+                "bloomberg_bpipe" => "🔒 Bloomberg B-PIPE ($2.5k/mo)",
+                _ => "⚡ Synthetic Offline (0ms, $0)",
+            };
+
+            egui::ComboBox::from_id_salt("feed_source_combo")
+                .selected_text(current_source_name)
+                .show_ui(ui, |ui| {
+                    if ui.selectable_value(&mut self.active_data_source, "synthetic".to_string(), "⚡ Synthetic Offline (0ms, $0)").clicked() {
+                        self.fetch_market_feed();
+                    }
+                    if ui.selectable_value(&mut self.active_data_source, "binance".to_string(), "⚡ Binance Public (Real-Time 0s, $0)").clicked() {
+                        self.fetch_market_feed();
+                    }
+                    if ui.selectable_value(&mut self.active_data_source, "hyperliquid".to_string(), "⚡ Hyperliquid L1 DEX (Real-Time 0s, $0)").clicked() {
+                        self.fetch_market_feed();
+                    }
+                    if ui.selectable_value(&mut self.active_data_source, "yahoo".to_string(), "⏱️ Yahoo Finance (15m Delay, $0)").clicked() {
+                        self.fetch_market_feed();
+                    }
+                    if ui.selectable_value(&mut self.active_data_source, "ecb".to_string(), "📅 ECB Euro Reference (Daily, $0)").clicked() {
+                        self.fetch_market_feed();
+                    }
+                    ui.separator();
+                    ui.label(egui::RichText::new("🔒 EXCHANGE PAYOLA TIERS").color(amber).small());
+                    if ui.selectable_value(&mut self.active_data_source, "twelve_data".to_string(), "TwelveData Pro ($29/mo)").clicked() {
+                        self.fetch_market_feed();
+                    }
+                    if ui.selectable_value(&mut self.active_data_source, "interactive_brokers".to_string(), "IBKR Gateway ($1.50/mo exchange fee)").clicked() {
+                        self.fetch_market_feed();
+                    }
+                    if ui.selectable_value(&mut self.active_data_source, "polygon_io".to_string(), "Polygon.io SIP ($29-$199/mo)").clicked() {
+                        self.fetch_market_feed();
+                    }
+                    if ui.selectable_value(&mut self.active_data_source, "bloomberg_bpipe".to_string(), "Bloomberg B-PIPE ($2,500/mo)").clicked() {
+                        self.fetch_market_feed();
+                    }
+                });
+
+            if let Some(ref mkt) = self.market_data {
+                if let Some(note) = mkt["status_note"].as_str() {
+                    let is_live = mkt["is_live"].as_bool().unwrap_or(false);
+                    let badge_col = if is_live { green } else { gold };
+                    ui.colored_label(badge_col, note);
+                }
+            }
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("📡 View Payola Matrix").clicked() {
+                    self.active_workspace = ActiveWorkspace::DataSources;
+                }
+            });
+        });
+        ui.separator();
 
         // Sub-toolbar: Date Ranges, Timeframes, Chart Styles & Overlays
         ui.horizontal(|ui| {

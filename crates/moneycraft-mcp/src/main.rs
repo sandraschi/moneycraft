@@ -29,10 +29,14 @@ struct Cli {
 enum Commands {
     /// Check MoneyCraft status and quantitative modules
     Status,
+    /// List all switchable Market Data Sources, delays, and Exchange Payola tiers
+    Sources,
     /// Fetch candlestick bars and volume for ticker symbol
     Ticker {
         #[arg(default_value = "BTC/USD")]
         symbol: String,
+        #[arg(long, default_value = "synthetic")]
+        source: String,
     },
     /// Audit smart contract bytecode for honeypots and malicious backdoors
     Audit {
@@ -99,8 +103,12 @@ fn main() {
             let res = rt.block_on(dispatch(Command::Status, &store));
             println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
         }
-        Some(Commands::Ticker { symbol }) => {
-            let res = rt.block_on(dispatch(Command::GetMarketFeed { symbol, bar_count: Some(60) }, &store));
+        Some(Commands::Sources) => {
+            let res = rt.block_on(dispatch(Command::ListDataSources, &store));
+            println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
+        }
+        Some(Commands::Ticker { symbol, source }) => {
+            let res = rt.block_on(dispatch(Command::GetMarketFeed { symbol, bar_count: Some(60), source: Some(source) }, &store));
             println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
         }
         Some(Commands::Audit { address, chain }) => {
@@ -190,12 +198,17 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
                 "result": {
                     "tools": [
                         { "name": "finance_status", "description": "Check MoneyCraft status and quantitative modules", "inputSchema": { "type": "object", "properties": {} } },
+                        { "name": "finance_list_data_sources", "description": "List all switchable real and simulated market data sources, latency delays, and Exchange Payola tiers", "inputSchema": { "type": "object", "properties": {} } },
                         {
                             "name": "finance_ticker",
-                            "description": "Fetch real-time candlestick bars and volume for ticker symbol",
+                            "description": "Fetch real-time or delayed candlestick bars and volume for ticker symbol from selected source",
                             "inputSchema": {
                                 "type": "object",
-                                "properties": { "symbol": { "type": "string" } },
+                                "properties": {
+                                    "symbol": { "type": "string" },
+                                    "source": { "type": "string", "description": "Data provider ID: synthetic, binance, hyperliquid, yahoo, or ecb" },
+                                    "bar_count": { "type": "integer" }
+                                },
                                 "required": ["symbol"]
                             }
                         },
@@ -253,10 +266,12 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
 
                 let tool_res = match tool_name {
                     "finance_status" => rt.block_on(dispatch(Command::Status, store)),
+                    "finance_list_data_sources" => rt.block_on(dispatch(Command::ListDataSources, store)),
                     "finance_ticker" => {
                         let sym = args["symbol"].as_str().unwrap_or("BTC/USD").to_string();
                         let bars = args["bar_count"].as_u64().map(|b| b as usize);
-                        rt.block_on(dispatch(Command::GetMarketFeed { symbol: sym, bar_count: bars }, store))
+                        let src = args["source"].as_str().map(|s| s.to_string());
+                        rt.block_on(dispatch(Command::GetMarketFeed { symbol: sym, bar_count: bars, source: src }, store))
                     }
                     "finance_audit_contract" => {
                         let addr = args["address"].as_str().unwrap_or("").to_string();
