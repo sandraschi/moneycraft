@@ -1,7 +1,9 @@
 //! MoneyCraft Core Library & Quantitative Command Bus.
 //!
 //! Event-driven backtesting, anti-scam auditing, position risk gates,
-//! forex rates, crypto derivatives (liquidation heatmap & funding arbitrage),
+//! global indices (Dow, S&P 500, Nasdaq, DAX, Nikkei, KOSPI, FTSE, Hang Seng),
+//! multi-symbol comparison overlays, arbitrary date-range filtering,
+//! crypto derivatives (liquidation heatmap & funding arbitrage),
 //! fantasy paper trading arena, live news ticker wire, and sovereign portfolio tax calculation.
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
@@ -15,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 pub const CONTROL_PORT: u16 = 14117;
-pub const APP_VERSION: &str = "0.4.0";
+pub const APP_VERSION: &str = "0.5.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaperPosition {
@@ -51,6 +53,11 @@ pub enum Command {
     Status,
     GetMarketFeed {
         symbol: String,
+        bar_count: Option<usize>,
+    },
+    GetMultiSymbolFeed {
+        symbols: Vec<String>,
+        bar_count: Option<usize>,
     },
     GetCryptoDerivativesFeed {
         symbol: String,
@@ -104,6 +111,9 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
                 "status": "ready",
                 "modules": [
                     "Bloomberg_Terminal_TimeSeries", "Technical_Indicators_SMA_EMA_BB_RSI_CVD",
+                    "Global_Indices_Desk_DOW_SPX_NDX_DAX_NIKKEI_KOSPI_FTSE_HSI",
+                    "Multi_Symbol_Normalized_Comparison_Graph",
+                    "Arbitrary_Date_Range_Selector",
                     "Forex_Currency_Desk_EUR_USD_JPY_GBP_CNY",
                     "Crypto_Derivatives_Liquidation_Heatmap",
                     "Hyperliquid_Funding_Rate_Arbitrage",
@@ -112,12 +122,13 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
                     "Agentic_AI_Quant_Workflows",
                     "Backtester_MonteCarlo", "Honeypot_Auditor", "Orderbook_Microstructure", "Tax_Ledger"
                 ],
-                "supported_assets": ["Crypto", "Perpetual_Futures", "Forex", "Equities", "Commodities"],
+                "supported_assets": ["Global_Indices", "Crypto", "Perpetual_Futures", "Forex", "Equities", "Commodities"],
                 "success": true
             })
         }
-        Command::GetMarketFeed { symbol } => {
-            let candles = MarketFeed::mock_candles(&symbol);
+        Command::GetMarketFeed { symbol, bar_count } => {
+            let count = bar_count.unwrap_or(60);
+            let candles = MarketFeed::mock_candles_with_count(&symbol, count);
             let indicators = MarketFeed::calculate_indicators(&candles);
             let summary = MarketFeed::summarize_ticker(&symbol, &candles);
 
@@ -128,6 +139,37 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
                 "bars_count": candles.len(),
                 "candles": candles,
                 "indicators": indicators,
+            })
+        }
+        Command::GetMultiSymbolFeed { symbols, bar_count } => {
+            let count = bar_count.unwrap_or(60);
+            let mut series = Vec::new();
+
+            for sym in &symbols {
+                let candles = MarketFeed::mock_candles_with_count(sym, count);
+                let summary = MarketFeed::summarize_ticker(sym, &candles);
+                let first_close = candles.first().map(|c| c.close).unwrap_or(1.0);
+
+                // Normalized percentage returns: ((price - p0) / p0) * 100
+                let normalized_returns: Vec<f64> = candles
+                    .iter()
+                    .map(|c| ((c.close - first_close) / first_close) * 100.0)
+                    .collect();
+
+                series.push(json!({
+                    "symbol": sym,
+                    "summary": summary,
+                    "first_price": first_close,
+                    "current_price": summary.current_price,
+                    "normalized_pct_series": normalized_returns,
+                    "candles": candles
+                }));
+            }
+
+            json!({
+                "success": true,
+                "count": symbols.len(),
+                "series": series
             })
         }
         Command::GetCryptoDerivativesFeed { symbol } => {
@@ -148,7 +190,6 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
             })
         }
         Command::PaperGetAccount => {
-            // Retrieve paper state or initialize standard $100k demo bankroll
             let positions = vec![
                 PaperPosition {
                     id: "POS-101".to_string(),
@@ -182,6 +223,21 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
                 },
                 PaperPosition {
                     id: "POS-103".to_string(),
+                    symbol: "KOSPI".to_string(),
+                    side: "LONG".to_string(),
+                    order_type: "PERP_FUTURES".to_string(),
+                    leverage: 15.0,
+                    quantity: 20.0,
+                    entry_price: 2520.0,
+                    current_price: 2580.0,
+                    margin_allocated: 3360.0,
+                    liquidation_price: 2368.0,
+                    unrealized_pnl: 1200.0,
+                    unrealized_pnl_pct: 35.7,
+                    timestamp_epoch: 1762232800,
+                },
+                PaperPosition {
+                    id: "POS-104".to_string(),
                     symbol: "USD/JPY".to_string(),
                     side: "SHORT".to_string(),
                     order_type: "PERP_FUTURES".to_string(),
@@ -209,7 +265,7 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
                     available_balance: avail,
                     margin_used,
                     unrealized_pnl: un_pnl,
-                    win_count: 14,
+                    win_count: 16,
                     loss_count: 3,
                     positions,
                 }
@@ -304,7 +360,8 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
                             "volatility_regime_shift": "Moderate-to-High (+18.4% VIX equivalent)",
                             "most_vulnerable_positions": [
                                 {"asset": "EUR/USD", "factor_beta": 1.45, "downside_risk": "High if Fed cuts slower than ECB"},
-                                {"asset": "USD/JPY", "factor_beta": -1.82, "downside_risk": "Carry unwind on BOJ hike"}
+                                {"asset": "USD/JPY", "factor_beta": -1.82, "downside_risk": "Carry unwind on BOJ hike"},
+                                {"asset": "KOSPI", "factor_beta": 1.62, "downside_risk": "Tech export sensitivity to trade tariffs"}
                             ],
                             "hedging_recommendation": "Long XAU/USD hedge + delta-neutral FX strangle on USD/JPY"
                         }
@@ -397,12 +454,14 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
             json!({
                 "success": true,
                 "base_currency": "USD",
-                "total_equity_usd": 412580.40,
-                "unrealized_pnl_usd": 42180.12,
-                "realized_pnl_ytd": 86400.00,
-                "estimated_tax_liability": 21600.00,
+                "total_equity_usd": 486240.40,
+                "unrealized_pnl_usd": 48180.12,
+                "realized_pnl_ytd": 92400.00,
+                "estimated_tax_liability": 23100.00,
                 "positions": [
                     {"symbol": "BTC/USD", "asset_class": "Crypto", "qty": 2.5, "entry_price": 82000.0, "current_price": 96450.0, "pnl_usd": 36125.0},
+                    {"symbol": "DJIA", "asset_class": "Index", "qty": 10.0, "entry_price": 41200.0, "current_price": 42200.0, "pnl_usd": 10000.0},
+                    {"symbol": "KOSPI", "asset_class": "Index", "qty": 80.0, "entry_price": 2510.0, "current_price": 2580.0, "pnl_usd": 5600.0},
                     {"symbol": "EUR/USD", "asset_class": "Forex", "qty": 100000.0, "entry_price": 1.0780, "current_price": 1.0845, "pnl_usd": 650.0},
                     {"symbol": "USD/JPY", "asset_class": "Forex", "qty": -50000.0, "entry_price": 153.20, "current_price": 152.40, "pnl_usd": 261.12},
                     {"symbol": "GBP/USD", "asset_class": "Forex", "qty": 40000.0, "entry_price": 1.2910, "current_price": 1.2980, "pnl_usd": 280.0},

@@ -75,7 +75,7 @@ fn main() {
             println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
         }
         Some(Commands::Ticker { symbol }) => {
-            let res = rt.block_on(dispatch(Command::GetMarketFeed { symbol }, &store));
+            let res = rt.block_on(dispatch(Command::GetMarketFeed { symbol, bar_count: Some(60) }, &store));
             println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
         }
         Some(Commands::Audit { address, chain }) => {
@@ -183,7 +183,8 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
                     "finance_status" => rt.block_on(dispatch(Command::Status, store)),
                     "finance_ticker" => {
                         let sym = args["symbol"].as_str().unwrap_or("BTC/USD").to_string();
-                        rt.block_on(dispatch(Command::GetMarketFeed { symbol: sym }, store))
+                        let bars = args["bar_count"].as_u64().map(|b| b as usize);
+                        rt.block_on(dispatch(Command::GetMarketFeed { symbol: sym, bar_count: bars }, store))
                     }
                     "finance_audit_contract" => {
                         let addr = args["address"].as_str().unwrap_or("").to_string();

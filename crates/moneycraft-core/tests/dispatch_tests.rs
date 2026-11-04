@@ -17,7 +17,7 @@ async fn test_moneycraft_market_feed_and_honeypot_auditor() -> Result<(), Box<dy
     let store = DatabaseStore::open_in_memory()?;
 
     // 1. Market feed query
-    let feed_res = dispatch(Command::GetMarketFeed { symbol: "BTC/USD".to_string() }, &store).await;
+    let feed_res = dispatch(Command::GetMarketFeed { symbol: "BTC/USD".to_string(), bar_count: Some(60) }, &store).await;
     assert_eq!(feed_res["success"], true);
     let candles = feed_res["candles"].as_array().ok_or("missing candles")?;
     assert!(candles.len() >= 4);

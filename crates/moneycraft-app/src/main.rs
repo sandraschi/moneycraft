@@ -1,7 +1,8 @@
 //! MoneyCraft Native Desktop Studio.
 //!
 //! Visual financial terminal with Bloomberg Terminal grade time-series charting,
-//! multi-asset coverage (Crypto, Equities, Commodities, and Forex EUR/USD, USD/JPY, GBP/USD, USD/CNY),
+//! Global Indices desk (Dow Jones, S&P 500, Nasdaq, DAX, Nikkei, KOSPI, FTSE, Hang Seng),
+//! multi-symbol normalized comparison overlays, arbitrary date-range filtering,
 //! crypto derivatives intelligence (Hyperliquid funding arbitrage & liquidation heatmaps),
 //! fantasy paper trading arena (leveraged futures & spot sandbox),
 //! real-time Bloomberg news ticker wire, institutional agentic AI workflows,
@@ -22,6 +23,7 @@ use tokio::runtime::Runtime;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveWorkspace {
     Terminal,
+    MultiComparison,
     CryptoDerivatives,
     FantasyTrading,
     AiWorkflows,
@@ -38,12 +40,13 @@ pub enum ChartStyle {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Timeframe {
-    D1,
-    W1,
-    M1,
-    M3,
-    Y1,
+pub enum DateRangePreset {
+    Day1,
+    Week1,
+    Month1,
+    Month3,
+    YearToDate,
+    Year1,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,14 +64,19 @@ pub struct MoneyCraftGui {
     pub selected_symbol: String,
     pub command_input: String,
 
-    // Bloomberg Charting Controls
+    // Bloomberg Charting Controls & Date Range
     pub chart_style: ChartStyle,
-    pub timeframe: Timeframe,
+    pub date_preset: DateRangePreset,
+    pub custom_bar_count: usize,
     pub show_sma20: bool,
     pub show_ema50: bool,
     pub show_bollinger: bool,
     pub show_volume: bool,
     pub show_rsi: bool,
+
+    // Multi-Symbol Comparison Engine
+    pub comparison_symbols: Vec<String>,
+    pub comparison_data: Option<Value>,
 
     // News Ticker
     pub news_index: usize,
@@ -116,15 +124,18 @@ impl MoneyCraftGui {
             store,
             runtime,
             active_workspace: ActiveWorkspace::Terminal,
-            selected_symbol: "BTC/USD".to_string(),
+            selected_symbol: "DJIA".to_string(),
             command_input: String::new(),
             chart_style: ChartStyle::Candlestick,
-            timeframe: Timeframe::D1,
+            date_preset: DateRangePreset::Month1,
+            custom_bar_count: 60,
             show_sma20: true,
             show_ema50: true,
             show_bollinger: true,
             show_volume: true,
             show_rsi: true,
+            comparison_symbols: vec!["DJIA".to_string(), "SPX".to_string(), "KOSPI".to_string(), "DAX".to_string()],
+            comparison_data: None,
             news_index: 0,
             news_data: None,
             derivatives_data: None,
@@ -134,7 +145,7 @@ impl MoneyCraftGui {
             paper_leverage: 10.0,
             paper_quantity: 0.5,
             ai_mode: AiWorkflowMode::StrategyGen,
-            ai_prompt: "Develop a momentum breakout strategy with mean-reversion Bollinger bands on EUR/USD".to_string(),
+            ai_prompt: "Develop a momentum breakout strategy with mean-reversion Bollinger bands on KOSPI vs DJIA".to_string(),
             ai_result: None,
             audit_address: "0x123_scam_token_trap".to_string(),
             audit_chain: "Ethereum".to_string(),
@@ -155,6 +166,7 @@ impl MoneyCraftGui {
         };
 
         app.fetch_market_feed();
+        app.fetch_multi_comparison();
         app.fetch_derivatives();
         app.fetch_news_ticker();
         app.fetch_paper_account();
@@ -164,9 +176,31 @@ impl MoneyCraftGui {
 
     pub fn fetch_market_feed(&mut self) {
         let sym = self.selected_symbol.clone();
-        let res = self.runtime.block_on(dispatch(Command::GetMarketFeed { symbol: sym.clone() }, &self.store));
+        let bars = self.custom_bar_count;
+        let res = self.runtime.block_on(dispatch(Command::GetMarketFeed { symbol: sym.clone(), bar_count: Some(bars) }, &self.store));
         self.market_data = Some(res);
-        self.status_message = format!("Bloomberg market feed updated for {sym}");
+        self.status_message = format!("Bloomberg market feed updated for {sym} ({bars} bars)");
+    }
+
+    pub fn fetch_multi_comparison(&mut self) {
+        let syms = self.comparison_symbols.clone();
+        let bars = self.custom_bar_count;
+        let res = self.runtime.block_on(dispatch(Command::GetMultiSymbolFeed { symbols: syms, bar_count: Some(bars) }, &self.store));
+        self.comparison_data = Some(res);
+    }
+
+    pub fn set_date_preset(&mut self, preset: DateRangePreset) {
+        self.date_preset = preset;
+        self.custom_bar_count = match preset {
+            DateRangePreset::Day1 => 24,
+            DateRangePreset::Week1 => 35,
+            DateRangePreset::Month1 => 60,
+            DateRangePreset::Month3 => 90,
+            DateRangePreset::YearToDate => 120,
+            DateRangePreset::Year1 => 180,
+        };
+        self.fetch_market_feed();
+        self.fetch_multi_comparison();
     }
 
     pub fn fetch_derivatives(&mut self) {
@@ -287,6 +321,7 @@ impl eframe::App for MoneyCraftGui {
                     }
                     if ui.button("Refresh Market Feed").clicked() {
                         self.fetch_market_feed();
+                        self.fetch_multi_comparison();
                         self.fetch_derivatives();
                         ui.close();
                     }
@@ -297,6 +332,17 @@ impl eframe::App for MoneyCraftGui {
                     ui.separator();
                     if ui.button("Exit").clicked() {
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                });
+
+                ui.menu_button("Global Indices", |ui| {
+                    for sym in &["DJIA", "SPX", "NDX", "DAX", "N225", "KOSPI", "FTSE", "HSI"] {
+                        if ui.button(*sym).clicked() {
+                            self.selected_symbol = sym.to_string();
+                            self.fetch_market_feed();
+                            self.fetch_derivatives();
+                            ui.close();
+                        }
                     }
                 });
 
@@ -399,12 +445,15 @@ impl eframe::App for MoneyCraftGui {
                         let high = summary["high_24h"].as_f64().unwrap_or(0.0);
                         let low = summary["low_24h"].as_f64().unwrap_or(0.0);
                         let is_forex = summary["is_forex"].as_bool().unwrap_or(false);
+                        let is_index = summary["is_index"].as_bool().unwrap_or(false);
                         let pip_precision = summary["pip_precision"].as_u64().unwrap_or(2) as usize;
 
                         ui.label(egui::RichText::new(&self.selected_symbol).strong().color(Color32::WHITE));
 
                         let fmt_price = if is_forex {
                             format!("{cur_price:.prec$}", prec = pip_precision)
+                        } else if is_index {
+                            format!("{cur_price:.2} PTS")
                         } else {
                             format!("${cur_price:.2}")
                         };
@@ -501,6 +550,10 @@ impl eframe::App for MoneyCraftGui {
                 self.active_workspace = ActiveWorkspace::Terminal;
                 self.fetch_market_feed();
             }
+            if nav_btn(ui, self.active_workspace == ActiveWorkspace::MultiComparison, "📈 Multi-Asset Compare") {
+                self.active_workspace = ActiveWorkspace::MultiComparison;
+                self.fetch_multi_comparison();
+            }
             if nav_btn(ui, self.active_workspace == ActiveWorkspace::CryptoDerivatives, "🔥 Crypto Perps & Heatmap") {
                 self.active_workspace = ActiveWorkspace::CryptoDerivatives;
                 self.fetch_derivatives();
@@ -525,7 +578,19 @@ impl eframe::App for MoneyCraftGui {
 
             ui.add_space(10.0);
             ui.separator();
-            ui.strong(egui::RichText::new("CRYPTO PERPS").color(amber));
+            ui.strong(egui::RichText::new("GLOBAL INDICES").color(amber));
+            for sym in &["DJIA", "SPX", "NDX", "DAX", "N225", "KOSPI", "FTSE", "HSI"] {
+                let is_sel = self.selected_symbol == *sym;
+                if ui.selectable_label(is_sel, *sym).clicked() {
+                    self.selected_symbol = sym.to_string();
+                    self.fetch_market_feed();
+                    self.fetch_derivatives();
+                }
+            }
+
+            ui.add_space(10.0);
+            ui.separator();
+            ui.strong(egui::RichText::new("CRYPTO & PERPS").color(amber));
             for sym in &["BTC/USD", "ETH/USD", "SOL/USD"] {
                 let is_sel = self.selected_symbol == *sym;
                 if ui.selectable_label(is_sel, *sym).clicked() {
@@ -551,6 +616,7 @@ impl eframe::App for MoneyCraftGui {
         // 5. Central Panel
         egui::CentralPanel::default().show(ui, |ui| match self.active_workspace {
             ActiveWorkspace::Terminal => self.render_bloomberg_terminal(ui),
+            ActiveWorkspace::MultiComparison => self.render_multi_comparison(ui),
             ActiveWorkspace::CryptoDerivatives => self.render_crypto_derivatives(ui),
             ActiveWorkspace::FantasyTrading => self.render_fantasy_trading(ui),
             ActiveWorkspace::AiWorkflows => self.render_ai_workflows(ui),
@@ -594,8 +660,10 @@ impl eframe::App for MoneyCraftGui {
                 .collapsible(false)
                 .resizable(false)
                 .show(ui.ctx(), |ui| {
-                    ui.heading("MoneyCraft Sovereign Terminal v0.4.0");
+                    ui.heading("MoneyCraft Sovereign Terminal v0.5.0");
                     ui.label("Bloomberg-grade financial analysis, high-density time-series charting,");
+                    ui.label("Global Indices desk (Dow Jones, S&P 500, Nasdaq, DAX, Nikkei 225, KOSPI, FTSE, Hang Seng),");
+                    ui.label("Multi-asset normalized comparison graph & arbitrary date-range presets (1D, 1W, 1M, 3M, YTD, 1Y),");
                     ui.label("Hyperliquid funding arbitrage & forward-looking liquidation heatmap,");
                     ui.label("Fantasy paper trading futures desk (1x-50x leverage sandbox),");
                     ui.label("G10 Forex desk (EUR, USD, JPY, GBP, CNY), breaking news ticker,");
@@ -618,8 +686,29 @@ impl MoneyCraftGui {
         let gold = Color32::from_rgb(255, 214, 0);
         let purple = Color32::from_rgb(179, 136, 255);
 
-        // Sub-toolbar: Timeframes, Chart Styles & Indicator Overlays
+        // Sub-toolbar: Date Ranges, Timeframes, Chart Styles & Overlays
         ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("RANGE:").color(amber).monospace());
+            if ui.selectable_label(self.date_preset == DateRangePreset::Day1, "1D").clicked() {
+                self.set_date_preset(DateRangePreset::Day1);
+            }
+            if ui.selectable_label(self.date_preset == DateRangePreset::Week1, "1W").clicked() {
+                self.set_date_preset(DateRangePreset::Week1);
+            }
+            if ui.selectable_label(self.date_preset == DateRangePreset::Month1, "1M").clicked() {
+                self.set_date_preset(DateRangePreset::Month1);
+            }
+            if ui.selectable_label(self.date_preset == DateRangePreset::Month3, "3M").clicked() {
+                self.set_date_preset(DateRangePreset::Month3);
+            }
+            if ui.selectable_label(self.date_preset == DateRangePreset::YearToDate, "YTD").clicked() {
+                self.set_date_preset(DateRangePreset::YearToDate);
+            }
+            if ui.selectable_label(self.date_preset == DateRangePreset::Year1, "1Y").clicked() {
+                self.set_date_preset(DateRangePreset::Year1);
+            }
+
+            ui.separator();
             ui.label(egui::RichText::new("STYLE:").color(amber).monospace());
             if ui.selectable_label(self.chart_style == ChartStyle::Candlestick, "🕯️ Candlestick").clicked() {
                 self.chart_style = ChartStyle::Candlestick;
@@ -957,6 +1046,177 @@ impl MoneyCraftGui {
         }
     }
 
+    fn render_multi_comparison(&mut self, ui: &mut egui::Ui) {
+        let amber = Color32::from_rgb(255, 179, 0);
+        let colors = [
+            Color32::from_rgb(0, 229, 255),   // Cyan
+            Color32::from_rgb(255, 214, 0),   // Gold
+            Color32::from_rgb(0, 230, 118),   // Jade
+            Color32::from_rgb(255, 23, 68),    // Crimson
+            Color32::from_rgb(179, 136, 255), // Purple
+            Color32::from_rgb(255, 128, 0),   // Orange
+        ];
+
+        ui.heading(egui::RichText::new("📈 MULTI-ASSET NORMALIZED COMPARISON OVERLAYS").color(amber));
+        ui.label("Direct correlation and relative percentage return comparison against global benchmarks (Baseline = 0.0%):");
+
+        // Sub-toolbar: Date Ranges & Active Ticker Tags
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("DATE RANGE:").color(amber).monospace());
+            if ui.selectable_label(self.date_preset == DateRangePreset::Day1, "1D").clicked() {
+                self.set_date_preset(DateRangePreset::Day1);
+            }
+            if ui.selectable_label(self.date_preset == DateRangePreset::Week1, "1W").clicked() {
+                self.set_date_preset(DateRangePreset::Week1);
+            }
+            if ui.selectable_label(self.date_preset == DateRangePreset::Month1, "1M").clicked() {
+                self.set_date_preset(DateRangePreset::Month1);
+            }
+            if ui.selectable_label(self.date_preset == DateRangePreset::Month3, "3M").clicked() {
+                self.set_date_preset(DateRangePreset::Month3);
+            }
+            if ui.selectable_label(self.date_preset == DateRangePreset::YearToDate, "YTD").clicked() {
+                self.set_date_preset(DateRangePreset::YearToDate);
+            }
+            if ui.selectable_label(self.date_preset == DateRangePreset::Year1, "1Y").clicked() {
+                self.set_date_preset(DateRangePreset::Year1);
+            }
+
+            ui.separator();
+            ui.label("COMPARE ASSETS:");
+            for (idx, sym) in self.comparison_symbols.iter().enumerate() {
+                let c = colors[idx % colors.len()];
+                ui.colored_label(c, format!("● {sym}"));
+            }
+        });
+        ui.separator();
+
+        let available_size = ui.available_size();
+        let chart_height = (available_size.y - 40.0).max(380.0);
+        let (response, painter) = ui.allocate_painter(Vec2::new(available_size.x, chart_height), egui::Sense::hover());
+        let rect = response.rect;
+
+        painter.rect_filled(rect, 4.0, Color32::from_rgb(6, 8, 12));
+        painter.rect_stroke(rect, 4.0, Stroke::new(1.0, Color32::from_rgb(33, 41, 54)), egui::StrokeKind::Inside);
+
+        let Some(ref comp) = self.comparison_data else {
+            painter.text(rect.center(), egui::Align2::CENTER_CENTER, "Loading multi-symbol comparison feeds...", egui::FontId::proportional(16.0), Color32::WHITE);
+            return;
+        };
+
+        let Some(series_list) = comp["series"].as_array() else {
+            return;
+        };
+
+        if series_list.is_empty() {
+            return;
+        }
+
+        let margin_left = 60.0;
+        let margin_right = 70.0;
+        let top_padding = 24.0;
+        let bottom_padding = 24.0;
+
+        let total_w = rect.width() - margin_left - margin_right;
+        let main_h = rect.height() - top_padding - bottom_padding;
+        let main_top = rect.top() + top_padding;
+        let main_bottom = main_top + main_h;
+
+        // Auto-scale normalized percentage returns (e.g. -15% to +25%)
+        let mut min_pct = 0.0_f64;
+        let mut max_pct = 0.0_f64;
+
+        for s in series_list {
+            if let Some(ret_arr) = s["normalized_pct_series"].as_array() {
+                for r in ret_arr {
+                    if let Some(val) = r.as_f64() {
+                        if val > max_pct { max_pct = val; }
+                        if val < min_pct { min_pct = val; }
+                    }
+                }
+            }
+        }
+
+        let pct_range = (max_pct - min_pct).max(2.0);
+        let scaled_min = min_pct - pct_range * 0.1;
+        let scaled_max = max_pct + pct_range * 0.1;
+        let scaled_range = scaled_max - scaled_min;
+
+        let to_y = |val: f64| -> f32 {
+            let norm = ((val - scaled_min) / scaled_range) as f32;
+            main_bottom - norm * main_h
+        };
+
+        // Baseline (0.0% return dashed line)
+        let y_zero = to_y(0.0);
+        painter.line_segment(
+            [Pos2::new(rect.left() + margin_left, y_zero), Pos2::new(rect.right() - margin_right, y_zero)],
+            Stroke::new(1.2, Color32::from_rgb(100, 115, 140)),
+        );
+        painter.text(
+            Pos2::new(rect.right() - margin_right + 6.0, y_zero),
+            egui::Align2::LEFT_CENTER,
+            "0.0% (BASE)",
+            egui::FontId::monospace(10.0),
+            Color32::from_rgb(180, 190, 210),
+        );
+
+        // Horizontal Grid Lines & Percent Labels
+        for i in 0..=4 {
+            let f = i as f64 / 4.0;
+            let val = scaled_min + f * scaled_range;
+            let y = to_y(val);
+
+            painter.line_segment(
+                [Pos2::new(rect.left() + margin_left, y), Pos2::new(rect.right() - margin_right, y)],
+                Stroke::new(0.8, Color32::from_rgb(20, 26, 36)),
+            );
+
+            painter.text(
+                Pos2::new(rect.right() - margin_right + 6.0, y),
+                egui::Align2::LEFT_CENTER,
+                format!("{val:+.1}%"),
+                egui::FontId::monospace(10.0),
+                Color32::from_rgb(140, 150, 165),
+            );
+        }
+
+        // Draw each stock's normalized percentage line
+        for (idx, s) in series_list.iter().enumerate() {
+            let sym = s["symbol"].as_str().unwrap_or("");
+            let stroke_color = colors[idx % colors.len()];
+
+            if let Some(ret_arr) = s["normalized_pct_series"].as_array() {
+                let n = ret_arr.len();
+                if n < 2 { continue; }
+                let step_x = total_w / ((n - 1) as f32);
+
+                let mut prev = None;
+                for (b_idx, r) in ret_arr.iter().enumerate() {
+                    if let Some(val) = r.as_f64() {
+                        let curr = Pos2::new(rect.left() + margin_left + (b_idx as f32) * step_x, to_y(val));
+                        if let Some(p) = prev {
+                            painter.line_segment([p, curr], Stroke::new(2.0, stroke_color));
+                        }
+                        prev = Some(curr);
+                    }
+                }
+
+                // Tag current final return at line end
+                if let Some(last_pos) = prev {
+                    let last_val = ret_arr.last().and_then(|v| v.as_f64()).unwrap_or(0.0);
+                    painter.text(
+                        Pos2::new(last_pos.x + 4.0, last_pos.y),
+                        egui::Align2::LEFT_CENTER,
+                        format!("{sym} ({last_val:+.1}%)"),
+                        egui::FontId::monospace(11.0),
+                        stroke_color,
+                    );
+                }
+            }
+        }
+    }
+
     fn render_crypto_derivatives(&mut self, ui: &mut egui::Ui) {
         let amber = Color32::from_rgb(255, 179, 0);
         let green = Color32::from_rgb(0, 230, 118);
@@ -1215,7 +1475,7 @@ impl MoneyCraftGui {
         ui.horizontal(|ui| {
             if ui.selectable_label(self.ai_mode == AiWorkflowMode::StrategyGen, "1. Code Strategy Gen (BQuant)").clicked() {
                 self.ai_mode = AiWorkflowMode::StrategyGen;
-                self.ai_prompt = "Build a mean-reverting statistical arbitrage model on EUR/USD vs USD/JPY".to_string();
+                self.ai_prompt = "Build a mean-reverting statistical arbitrage model on KOSPI vs DJIA".to_string();
             }
             if ui.selectable_label(self.ai_mode == AiWorkflowMode::MacroStressTest, "2. Macro Stress-Test (PORT)").clicked() {
                 self.ai_mode = AiWorkflowMode::MacroStressTest;

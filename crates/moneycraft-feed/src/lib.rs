@@ -1,6 +1,8 @@
 //! MoneyCraft Feed & Financial Time-Series Engine.
 //!
-//! High-density candlestick feeds for Crypto, Equities, Commodities, and Forex,
+//! High-density candlestick feeds for Global Indices (Dow Jones, S&P 500, Nasdaq, DAX, Nikkei, KOSPI, FTSE, Hang Seng),
+//! G10 Forex, Crypto, Equities, and Commodities.
+//! Supports multi-symbol comparison overlays, arbitrary date-range filtering,
 //! liquidation heatmaps, cross-exchange funding rate arbitrage matrix,
 //! technical indicators (SMA, EMA, Bollinger, RSI, CVD),
 //! news wire sentiment feeds, and smart contract anti-scam auditing.
@@ -44,6 +46,7 @@ pub struct MarketTickerSummary {
     pub volume_24h: f64,
     pub vwap: f64,
     pub is_forex: bool,
+    pub is_index: bool,
     pub pip_precision: usize,
 }
 
@@ -79,7 +82,7 @@ pub struct CryptoDerivativesData {
 pub struct NewsHeadline {
     pub id: String,
     pub timestamp_str: String,
-    pub category: String, // "MACRO", "FOREX", "CENTRAL_BANK", "EQUITY", "CRYPTO"
+    pub category: String, // "MACRO", "INDICES", "FOREX", "CENTRAL_BANK", "EQUITY", "CRYPTO"
     pub headline: String,
     pub sentiment: String, // "BULLISH", "BEARISH", "NEUTRAL"
     pub sentiment_score: f32, // -1.0 to +1.0
@@ -108,24 +111,45 @@ impl MarketFeed {
     #[must_use]
     pub fn available_symbols() -> Vec<(&'static str, &'static str, &'static str)> {
         vec![
-            ("BTC/USD", "Bitcoin / US Dollar", "CRYPTO"),
-            ("ETH/USD", "Ethereum / US Dollar", "CRYPTO"),
-            ("SOL/USD", "Solana / US Dollar", "CRYPTO"),
+            // Global Indices
+            ("DJIA", "Dow Jones Industrial Average", "INDEX"),
+            ("SPX", "S&P 500 Large-Cap Index", "INDEX"),
+            ("NDX", "Nasdaq-100 Tech Index", "INDEX"),
+            ("DAX", "DAX 40 (Germany)", "INDEX"),
+            ("N225", "Nikkei 225 (Japan)", "INDEX"),
+            ("KOSPI", "KOSPI Composite (South Korea)", "INDEX"),
+            ("FTSE", "FTSE 100 (United Kingdom)", "INDEX"),
+            ("HSI", "Hang Seng Index (Hong Kong)", "INDEX"),
+            // Major Forex Pairs
             ("EUR/USD", "Euro / US Dollar", "FOREX"),
             ("USD/JPY", "US Dollar / Japanese Yen", "FOREX"),
             ("GBP/USD", "British Pound / US Dollar", "FOREX"),
             ("USD/CNY", "US Dollar / Chinese Renminbi", "FOREX"),
             ("EUR/GBP", "Euro / British Pound", "FOREX"),
-            ("SPY", "S&P 500 ETF Trust", "EQUITY"),
+            // Cryptocurrencies
+            ("BTC/USD", "Bitcoin / US Dollar", "CRYPTO"),
+            ("ETH/USD", "Ethereum / US Dollar", "CRYPTO"),
+            ("SOL/USD", "Solana / US Dollar", "CRYPTO"),
+            // Equities & Commodities
             ("NVDA", "Nvidia Corporation", "EQUITY"),
+            ("SPY", "SPDR S&P 500 ETF Trust", "EQUITY"),
             ("XAU/USD", "Gold Bullion / USD", "COMMODITY"),
         ]
     }
 
-    /// Generates high-density time-series candlestick data (60 bars) with CVD.
+    /// Generates high-density time-series candlestick data with arbitrary count (10 to 180 bars).
     #[must_use]
-    pub fn mock_candles(symbol: &str) -> Vec<CandleBar> {
+    pub fn mock_candles_with_count(symbol: &str, count: usize) -> Vec<CandleBar> {
         let (base_price, volatility) = match symbol.to_uppercase().as_str() {
+            // Global Indices
+            "DJIA" | "^DJI" | "DOW" => (42_200.0, 120.0),
+            "SPX" | "^GSPC" | "S&P" => (5_860.0, 22.0),
+            "NDX" | "^NDX" | "NASDAQ" => (20_450.0, 95.0),
+            "DAX" | "^GDAXI" | "DE40" => (19_350.0, 85.0),
+            "N225" | "^N225" | "NIKKEI" => (38_480.0, 160.0),
+            "KOSPI" | "^KS11" | "COSPI" => (2_580.0, 14.0),
+            "FTSE" | "^FTSE" | "UK100" => (8_240.0, 35.0),
+            "HSI" | "^HSI" | "HANGSENG" => (20_550.0, 110.0),
             // Major Forex Pairs
             "EUR/USD" | "EURUSD" => (1.0845, 0.0018),
             "USD/JPY" | "USDJPY" => (152.40, 0.35),
@@ -142,7 +166,8 @@ impl MarketFeed {
             _ => (96450.0, 480.0), // BTC/USD default
         };
 
-        let mut candles = Vec::with_capacity(64);
+        let clamped_count = count.clamp(10, 180);
+        let mut candles = Vec::with_capacity(clamped_count + 4);
         let base_timestamp: u64 = 1762200000000;
         let mut curr_close = base_price * 0.985;
         let mut running_cvd = 0.0;
@@ -153,7 +178,7 @@ impl MarketFeed {
             None => 42,
         };
 
-        for i in 0..60 {
+        for i in 0..clamped_count {
             seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
             let r1 = ((seed >> 32) as f64) / (u32::MAX as f64);
             seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
@@ -163,7 +188,7 @@ impl MarketFeed {
 
             let open = curr_close;
             // Upward drift with realistic market noise
-            let drift = volatility * 0.12;
+            let drift = volatility * 0.10;
             let delta = (r1 - 0.46) * volatility * 2.0 + drift;
             let close = (open + delta).max(0.0001);
             let high = open.max(close) + r2 * volatility * 1.2;
@@ -189,6 +214,12 @@ impl MarketFeed {
         }
 
         candles
+    }
+
+    /// Generates standard 60-bar candlestick data with CVD.
+    #[must_use]
+    pub fn mock_candles(symbol: &str) -> Vec<CandleBar> {
+        Self::mock_candles_with_count(symbol, 60)
     }
 
     /// Computes SMA, EMA, Bollinger Bands, and RSI indicators.
@@ -275,6 +306,7 @@ impl MarketFeed {
     #[must_use]
     pub fn summarize_ticker(symbol: &str, candles: &[CandleBar]) -> MarketTickerSummary {
         let is_forex = symbol.contains("EUR") || symbol.contains("JPY") || symbol.contains("GBP") || symbol.contains("CNY") || symbol.contains("RMB");
+        let is_index = symbol == "DJIA" || symbol == "SPX" || symbol == "NDX" || symbol == "DAX" || symbol == "N225" || symbol == "KOSPI" || symbol == "FTSE" || symbol == "HSI";
         let pip_precision = if symbol.contains("JPY") {
             2
         } else if is_forex {
@@ -294,6 +326,7 @@ impl MarketFeed {
                 volume_24h: 0.0,
                 vwap: 0.0,
                 is_forex,
+                is_index,
                 pip_precision,
             };
         }
@@ -328,6 +361,7 @@ impl MarketFeed {
             volume_24h: vol_sum,
             vwap,
             is_forex,
+            is_index,
             pip_precision,
         }
     }
@@ -427,6 +461,24 @@ impl MarketFeed {
         vec![
             NewsHeadline {
                 id: "NW-901".to_string(),
+                timestamp_str: "12:26:10".to_string(),
+                category: "INDICES".to_string(),
+                headline: "Dow Jones & S&P 500 Hit Record Highs; Seoul KOSPI Surges 2.4% on Semiconductor Rally".to_string(),
+                sentiment: "BULLISH".to_string(),
+                sentiment_score: 0.89,
+                affected_symbols: vec!["DJIA".to_string(), "SPX".to_string(), "KOSPI".to_string()],
+            },
+            NewsHeadline {
+                id: "NW-902".to_string(),
+                timestamp_str: "12:18:40".to_string(),
+                category: "INDICES".to_string(),
+                headline: "Nikkei 225 Crosses 38,400 as Tech Exporters Outperform; DAX Steady in European Trade".to_string(),
+                sentiment: "BULLISH".to_string(),
+                sentiment_score: 0.76,
+                affected_symbols: vec!["N225".to_string(), "DAX".to_string(), "FTSE".to_string()],
+            },
+            NewsHeadline {
+                id: "NW-903".to_string(),
                 timestamp_str: "12:04:15".to_string(),
                 category: "CRYPTO".to_string(),
                 headline: "Hyperliquid Open Interest Hits Record $1.42B; Massive $360M Long Liquidation Cluster Sits at $94,500".to_string(),
@@ -435,7 +487,7 @@ impl MarketFeed {
                 affected_symbols: vec!["BTC/USD".to_string(), "ETH/USD".to_string(), "SOL/USD".to_string()],
             },
             NewsHeadline {
-                id: "NW-902".to_string(),
+                id: "NW-904".to_string(),
                 timestamp_str: "11:51:20".to_string(),
                 category: "FOREX".to_string(),
                 headline: "ECB's Lagarde Signals Steady Disinflation; EUR/USD Consolidates Near 1.0850".to_string(),
@@ -444,7 +496,7 @@ impl MarketFeed {
                 affected_symbols: vec!["EUR/USD".to_string(), "EUR/GBP".to_string()],
             },
             NewsHeadline {
-                id: "NW-903".to_string(),
+                id: "NW-905".to_string(),
                 timestamp_str: "11:48:05".to_string(),
                 category: "CENTRAL_BANK".to_string(),
                 headline: "Bank of Japan (BOJ) Governor Ueda Drops Hawkish Hints on Rate Path; JPY Strengthens to 152.10".to_string(),
@@ -453,40 +505,22 @@ impl MarketFeed {
                 affected_symbols: vec!["USD/JPY".to_string()],
             },
             NewsHeadline {
-                id: "NW-904".to_string(),
+                id: "NW-906".to_string(),
                 timestamp_str: "11:42:19".to_string(),
                 category: "MACRO".to_string(),
                 headline: "People's Bank of China (PBOC) Injects 150B Yuan Via Reverse Repo; Renminbi Steady at 7.12".to_string(),
                 sentiment: "NEUTRAL".to_string(),
                 sentiment_score: 0.05,
-                affected_symbols: vec!["USD/CNY".to_string()],
+                affected_symbols: vec!["USD/CNY".to_string(), "HSI".to_string()],
             },
             NewsHeadline {
-                id: "NW-905".to_string(),
+                id: "NW-907".to_string(),
                 timestamp_str: "11:35:44".to_string(),
                 category: "FOREX".to_string(),
                 headline: "Bank of England Highlights Service Inflation Persistence; UK Pound Holds Firm Above 1.2950".to_string(),
                 sentiment: "BULLISH".to_string(),
                 sentiment_score: 0.45,
                 affected_symbols: vec!["GBP/USD".to_string(), "EUR/GBP".to_string()],
-            },
-            NewsHeadline {
-                id: "NW-906".to_string(),
-                timestamp_str: "11:29:10".to_string(),
-                category: "CRYPTO".to_string(),
-                headline: "Institutional Spot Bitcoin ETFs Log $620M Daily Inflow as BTC Tests $96K Resistance".to_string(),
-                sentiment: "BULLISH".to_string(),
-                sentiment_score: 0.88,
-                affected_symbols: vec!["BTC/USD".to_string(), "ETH/USD".to_string()],
-            },
-            NewsHeadline {
-                id: "NW-907".to_string(),
-                timestamp_str: "11:15:02".to_string(),
-                category: "EQUITY".to_string(),
-                headline: "Semiconductor Hardware Capex Surges 34% YoY Amid Next-Gen Agentic AI Cluster Buildouts".to_string(),
-                sentiment: "BULLISH".to_string(),
-                sentiment_score: 0.78,
-                affected_symbols: vec!["NVDA".to_string(), "SPY".to_string()],
             },
         ]
     }
