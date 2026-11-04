@@ -1,7 +1,8 @@
 //! MoneyCraft Feed & Financial Time-Series Engine.
 //!
-//! High-density candlestick feeds for Crypto, Equities, Commodities, and Forex
-//! (EUR/USD, USD/JPY, GBP/USD, USD/CNY), technical indicators (SMA, EMA, Bollinger, RSI),
+//! High-density candlestick feeds for Crypto, Equities, Commodities, and Forex,
+//! liquidation heatmaps, cross-exchange funding rate arbitrage matrix,
+//! technical indicators (SMA, EMA, Bollinger, RSI, CVD),
 //! news wire sentiment feeds, and smart contract anti-scam auditing.
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
@@ -19,6 +20,7 @@ pub struct CandleBar {
     pub low: f64,
     pub close: f64,
     pub volume: f64,
+    pub cvd: f64, // Cumulative Volume Delta
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,6 +30,7 @@ pub struct TechnicalIndicators {
     pub bb_upper: Vec<Option<f64>>,
     pub bb_lower: Vec<Option<f64>>,
     pub rsi_14: Vec<Option<f64>>,
+    pub cvd: Vec<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,6 +45,34 @@ pub struct MarketTickerSummary {
     pub vwap: f64,
     pub is_forex: bool,
     pub pip_precision: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LiquidationBand {
+    pub price_level: f64,
+    pub volume_notional_mil: f64,
+    pub side: String, // "LONG_LIQ" (downside cascade) or "SHORT_LIQ" (upside squeeze)
+    pub distance_pct: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FundingRateVenue {
+    pub venue: String, // "Hyperliquid", "Binance", "Bybit", "OKX"
+    pub rate_8h_pct: f64,
+    pub annualized_apr_pct: f64,
+    pub open_interest_mil: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CryptoDerivativesData {
+    pub symbol: String,
+    pub mark_price: f64,
+    pub index_price: f64,
+    pub funding_rates: Vec<FundingRateVenue>,
+    pub arbitrage_spread_apr_pct: f64,
+    pub best_arb_long_venue: String,
+    pub best_arb_short_venue: String,
+    pub liquidation_heatmap: Vec<LiquidationBand>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,7 +122,7 @@ impl MarketFeed {
         ]
     }
 
-    /// Generates high-density time-series candlestick data (60 bars) for Bloomberg charting.
+    /// Generates high-density time-series candlestick data (60 bars) with CVD.
     #[must_use]
     pub fn mock_candles(symbol: &str) -> Vec<CandleBar> {
         let (base_price, volatility) = match symbol.to_uppercase().as_str() {
@@ -114,6 +145,7 @@ impl MarketFeed {
         let mut candles = Vec::with_capacity(64);
         let base_timestamp: u64 = 1762200000000;
         let mut curr_close = base_price * 0.985;
+        let mut running_cvd = 0.0;
 
         // Deterministic pseudo-random seed generator
         let mut seed: u64 = match symbol.chars().next() {
@@ -138,6 +170,11 @@ impl MarketFeed {
             let low = (open.min(close) - r3 * volatility * 1.2).max(0.0001);
             let volume = 850.0 + r1 * 2400.0;
 
+            // Compute delta aggression
+            let buy_ratio = if close >= open { 0.55 + r1 * 0.25 } else { 0.45 - r2 * 0.25 };
+            let bar_delta = volume * (2.0 * buy_ratio - 1.0);
+            running_cvd += bar_delta;
+
             candles.push(CandleBar {
                 timestamp_ms: base_timestamp + (i as u64) * 3600_000,
                 open,
@@ -145,6 +182,7 @@ impl MarketFeed {
                 low,
                 close,
                 volume,
+                cvd: running_cvd,
             });
 
             curr_close = close;
@@ -158,6 +196,7 @@ impl MarketFeed {
     pub fn calculate_indicators(candles: &[CandleBar]) -> TechnicalIndicators {
         let n = candles.len();
         let closes: Vec<f64> = candles.iter().map(|c| c.close).collect();
+        let cvd: Vec<f64> = candles.iter().map(|c| c.cvd).collect();
 
         // 1. SMA 20
         let mut sma_20 = vec![None; n];
@@ -228,6 +267,7 @@ impl MarketFeed {
             bb_upper,
             bb_lower,
             rsi_14,
+            cvd,
         }
     }
 
@@ -292,12 +332,110 @@ impl MarketFeed {
         }
     }
 
+    /// Generates Liquidation Heatmap clusters & Cross-Exchange Funding Arbitrage data.
+    #[must_use]
+    pub fn mock_derivatives_data(symbol: &str, current_price: f64) -> CryptoDerivativesData {
+        let is_crypto = symbol.contains("BTC") || symbol.contains("ETH") || symbol.contains("SOL");
+        let mark_price = if is_crypto { current_price } else { 96450.0 };
+        let index_price = mark_price * 0.9998;
+
+        // 1. Funding rates across venues
+        let funding_rates = vec![
+            FundingRateVenue {
+                venue: "Hyperliquid (L1 DEX)".to_string(),
+                rate_8h_pct: 0.0385,
+                annualized_apr_pct: 42.15,
+                open_interest_mil: 1420.5,
+            },
+            FundingRateVenue {
+                venue: "Binance Futures".to_string(),
+                rate_8h_pct: 0.0120,
+                annualized_apr_pct: 13.14,
+                open_interest_mil: 5890.0,
+            },
+            FundingRateVenue {
+                venue: "Bybit Perps".to_string(),
+                rate_8h_pct: 0.0155,
+                annualized_apr_pct: 16.97,
+                open_interest_mil: 3420.2,
+            },
+            FundingRateVenue {
+                venue: "OKX Swaps".to_string(),
+                rate_8h_pct: 0.0110,
+                annualized_apr_pct: 12.04,
+                open_interest_mil: 2180.8,
+            },
+        ];
+
+        let spread = 42.15 - 12.04;
+
+        // 2. Liquidation bands (Clusters above and below spot)
+        let liquidation_heatmap = vec![
+            LiquidationBand {
+                price_level: mark_price * 1.035,
+                volume_notional_mil: 142.5,
+                side: "SHORT_LIQ".to_string(),
+                distance_pct: 3.5,
+            },
+            LiquidationBand {
+                price_level: mark_price * 1.020,
+                volume_notional_mil: 285.0,
+                side: "SHORT_LIQ".to_string(),
+                distance_pct: 2.0,
+            },
+            LiquidationBand {
+                price_level: mark_price * 1.008,
+                volume_notional_mil: 89.4,
+                side: "SHORT_LIQ".to_string(),
+                distance_pct: 0.8,
+            },
+            LiquidationBand {
+                price_level: mark_price * 0.991,
+                volume_notional_mil: 114.2,
+                side: "LONG_LIQ".to_string(),
+                distance_pct: -0.9,
+            },
+            LiquidationBand {
+                price_level: mark_price * 0.978,
+                volume_notional_mil: 360.8,
+                side: "LONG_LIQ".to_string(),
+                distance_pct: -2.2,
+            },
+            LiquidationBand {
+                price_level: mark_price * 0.955,
+                volume_notional_mil: 520.4,
+                side: "LONG_LIQ".to_string(),
+                distance_pct: -4.5,
+            },
+        ];
+
+        CryptoDerivativesData {
+            symbol: symbol.to_string(),
+            mark_price,
+            index_price,
+            funding_rates,
+            arbitrage_spread_apr_pct: spread,
+            best_arb_long_venue: "OKX Swaps".to_string(),
+            best_arb_short_venue: "Hyperliquid (L1 DEX)".to_string(),
+            liquidation_heatmap,
+        }
+    }
+
     /// Live Bloomberg Institutional News Wire feed.
     #[must_use]
     pub fn mock_news_feed() -> Vec<NewsHeadline> {
         vec![
             NewsHeadline {
                 id: "NW-901".to_string(),
+                timestamp_str: "12:04:15".to_string(),
+                category: "CRYPTO".to_string(),
+                headline: "Hyperliquid Open Interest Hits Record $1.42B; Massive $360M Long Liquidation Cluster Sits at $94,500".to_string(),
+                sentiment: "BULLISH".to_string(),
+                sentiment_score: 0.82,
+                affected_symbols: vec!["BTC/USD".to_string(), "ETH/USD".to_string(), "SOL/USD".to_string()],
+            },
+            NewsHeadline {
+                id: "NW-902".to_string(),
                 timestamp_str: "11:51:20".to_string(),
                 category: "FOREX".to_string(),
                 headline: "ECB's Lagarde Signals Steady Disinflation; EUR/USD Consolidates Near 1.0850".to_string(),
@@ -306,7 +444,7 @@ impl MarketFeed {
                 affected_symbols: vec!["EUR/USD".to_string(), "EUR/GBP".to_string()],
             },
             NewsHeadline {
-                id: "NW-902".to_string(),
+                id: "NW-903".to_string(),
                 timestamp_str: "11:48:05".to_string(),
                 category: "CENTRAL_BANK".to_string(),
                 headline: "Bank of Japan (BOJ) Governor Ueda Drops Hawkish Hints on Rate Path; JPY Strengthens to 152.10".to_string(),
@@ -315,7 +453,7 @@ impl MarketFeed {
                 affected_symbols: vec!["USD/JPY".to_string()],
             },
             NewsHeadline {
-                id: "NW-903".to_string(),
+                id: "NW-904".to_string(),
                 timestamp_str: "11:42:19".to_string(),
                 category: "MACRO".to_string(),
                 headline: "People's Bank of China (PBOC) Injects 150B Yuan Via Reverse Repo; Renminbi Steady at 7.12".to_string(),
@@ -324,7 +462,7 @@ impl MarketFeed {
                 affected_symbols: vec!["USD/CNY".to_string()],
             },
             NewsHeadline {
-                id: "NW-904".to_string(),
+                id: "NW-905".to_string(),
                 timestamp_str: "11:35:44".to_string(),
                 category: "FOREX".to_string(),
                 headline: "Bank of England Highlights Service Inflation Persistence; UK Pound Holds Firm Above 1.2950".to_string(),
@@ -333,7 +471,7 @@ impl MarketFeed {
                 affected_symbols: vec!["GBP/USD".to_string(), "EUR/GBP".to_string()],
             },
             NewsHeadline {
-                id: "NW-905".to_string(),
+                id: "NW-906".to_string(),
                 timestamp_str: "11:29:10".to_string(),
                 category: "CRYPTO".to_string(),
                 headline: "Institutional Spot Bitcoin ETFs Log $620M Daily Inflow as BTC Tests $96K Resistance".to_string(),
@@ -342,7 +480,7 @@ impl MarketFeed {
                 affected_symbols: vec!["BTC/USD".to_string(), "ETH/USD".to_string()],
             },
             NewsHeadline {
-                id: "NW-906".to_string(),
+                id: "NW-907".to_string(),
                 timestamp_str: "11:15:02".to_string(),
                 category: "EQUITY".to_string(),
                 headline: "Semiconductor Hardware Capex Surges 34% YoY Amid Next-Gen Agentic AI Cluster Buildouts".to_string(),

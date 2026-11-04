@@ -2,8 +2,9 @@
 //!
 //! Visual financial terminal with Bloomberg Terminal grade time-series charting,
 //! multi-asset coverage (Crypto, Equities, Commodities, and Forex EUR/USD, USD/JPY, GBP/USD, USD/CNY),
-//! real-time Bloomberg news ticker wire, institutional agentic AI workflows
-//! (strategy generation, macro stress testing, sentiment alpha, execution routing),
+//! crypto derivatives intelligence (Hyperliquid funding arbitrage & liquidation heatmaps),
+//! fantasy paper trading arena (leveraged futures & spot sandbox),
+//! real-time Bloomberg news ticker wire, institutional agentic AI workflows,
 //! sandbox EVM honeypot auditor, algorithmic backtester, and sovereign portfolio ledger.
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
@@ -21,6 +22,8 @@ use tokio::runtime::Runtime;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveWorkspace {
     Terminal,
+    CryptoDerivatives,
+    FantasyTrading,
     AiWorkflows,
     HoneypotAuditor,
     Backtester,
@@ -71,6 +74,16 @@ pub struct MoneyCraftGui {
     pub news_index: usize,
     pub news_data: Option<Value>,
 
+    // Derivatives Data
+    pub derivatives_data: Option<Value>,
+
+    // Fantasy Paper Trading Desk
+    pub paper_account: Option<Value>,
+    pub paper_order_side: String, // "LONG" or "SHORT"
+    pub paper_order_type: String, // "SPOT" or "PERP_FUTURES"
+    pub paper_leverage: f64,
+    pub paper_quantity: f64,
+
     // AI Workflows
     pub ai_mode: AiWorkflowMode,
     pub ai_prompt: String,
@@ -103,7 +116,7 @@ impl MoneyCraftGui {
             store,
             runtime,
             active_workspace: ActiveWorkspace::Terminal,
-            selected_symbol: "EUR/USD".to_string(),
+            selected_symbol: "BTC/USD".to_string(),
             command_input: String::new(),
             chart_style: ChartStyle::Candlestick,
             timeframe: Timeframe::D1,
@@ -114,6 +127,12 @@ impl MoneyCraftGui {
             show_rsi: true,
             news_index: 0,
             news_data: None,
+            derivatives_data: None,
+            paper_account: None,
+            paper_order_side: "LONG".to_string(),
+            paper_order_type: "PERP_FUTURES".to_string(),
+            paper_leverage: 10.0,
+            paper_quantity: 0.5,
             ai_mode: AiWorkflowMode::StrategyGen,
             ai_prompt: "Develop a momentum breakout strategy with mean-reversion Bollinger bands on EUR/USD".to_string(),
             ai_result: None,
@@ -136,7 +155,9 @@ impl MoneyCraftGui {
         };
 
         app.fetch_market_feed();
+        app.fetch_derivatives();
         app.fetch_news_ticker();
+        app.fetch_paper_account();
         app.fetch_portfolio();
         app
     }
@@ -148,9 +169,53 @@ impl MoneyCraftGui {
         self.status_message = format!("Bloomberg market feed updated for {sym}");
     }
 
+    pub fn fetch_derivatives(&mut self) {
+        let sym = self.selected_symbol.clone();
+        let res = self.runtime.block_on(dispatch(Command::GetCryptoDerivativesFeed { symbol: sym.clone() }, &self.store));
+        self.derivatives_data = Some(res);
+    }
+
     pub fn fetch_news_ticker(&mut self) {
         let res = self.runtime.block_on(dispatch(Command::GetNewsTicker, &self.store));
         self.news_data = Some(res);
+    }
+
+    pub fn fetch_paper_account(&mut self) {
+        let res = self.runtime.block_on(dispatch(Command::PaperGetAccount, &self.store));
+        self.paper_account = Some(res);
+    }
+
+    pub fn open_paper_order(&mut self) {
+        let sym = self.selected_symbol.clone();
+        let side = self.paper_order_side.clone();
+        let ot = self.paper_order_type.clone();
+        let qty = self.paper_quantity;
+        let lev = self.paper_leverage;
+        let res = self.runtime.block_on(dispatch(
+            Command::PaperOpenPosition {
+                symbol: sym,
+                side,
+                order_type: ot,
+                quantity: qty,
+                leverage: lev,
+                price: None,
+            },
+            &self.store,
+        ));
+        self.status_message = res["message"].as_str().unwrap_or("Fantasy position placed").to_string();
+        self.fetch_paper_account();
+    }
+
+    pub fn close_paper_position(&mut self, pos_id: &str) {
+        let res = self.runtime.block_on(dispatch(Command::PaperClosePosition { position_id: pos_id.to_string() }, &self.store));
+        self.status_message = res["message"].as_str().unwrap_or("Position closed").to_string();
+        self.fetch_paper_account();
+    }
+
+    pub fn reset_paper_account(&mut self) {
+        let res = self.runtime.block_on(dispatch(Command::PaperResetAccount { initial_balance: Some(100_000.0) }, &self.store));
+        self.status_message = res["message"].as_str().unwrap_or("Account reset").to_string();
+        self.fetch_paper_account();
     }
 
     pub fn run_ai_workflow(&mut self) {
@@ -220,8 +285,9 @@ impl eframe::App for MoneyCraftGui {
                         self.fetch_portfolio();
                         ui.close();
                     }
-                    if ui.button("Refresh High-Density Feed").clicked() {
+                    if ui.button("Refresh Market Feed").clicked() {
                         self.fetch_market_feed();
+                        self.fetch_derivatives();
                         ui.close();
                     }
                     if ui.button("Refresh News Ticker").clicked() {
@@ -239,16 +305,18 @@ impl eframe::App for MoneyCraftGui {
                         if ui.button(*sym).clicked() {
                             self.selected_symbol = sym.to_string();
                             self.fetch_market_feed();
+                            self.fetch_derivatives();
                             ui.close();
                         }
                     }
                 });
 
-                ui.menu_button("Other Markets", |ui| {
-                    for sym in &["BTC/USD", "ETH/USD", "SOL/USD", "NVDA", "SPY", "XAU/USD"] {
+                ui.menu_button("Crypto & Perps", |ui| {
+                    for sym in &["BTC/USD", "ETH/USD", "SOL/USD"] {
                         if ui.button(*sym).clicked() {
                             self.selected_symbol = sym.to_string();
                             self.fetch_market_feed();
+                            self.fetch_derivatives();
                             ui.close();
                         }
                     }
@@ -408,6 +476,7 @@ impl eframe::App for MoneyCraftGui {
                         if !cmd_str.is_empty() {
                             self.selected_symbol = cmd_str.clone();
                             self.fetch_market_feed();
+                            self.fetch_derivatives();
                             self.command_input.clear();
                         }
                     }
@@ -432,6 +501,14 @@ impl eframe::App for MoneyCraftGui {
                 self.active_workspace = ActiveWorkspace::Terminal;
                 self.fetch_market_feed();
             }
+            if nav_btn(ui, self.active_workspace == ActiveWorkspace::CryptoDerivatives, "🔥 Crypto Perps & Heatmap") {
+                self.active_workspace = ActiveWorkspace::CryptoDerivatives;
+                self.fetch_derivatives();
+            }
+            if nav_btn(ui, self.active_workspace == ActiveWorkspace::FantasyTrading, "🎮 Fantasy Futures Sandbox") {
+                self.active_workspace = ActiveWorkspace::FantasyTrading;
+                self.fetch_paper_account();
+            }
             if nav_btn(ui, self.active_workspace == ActiveWorkspace::AiWorkflows, "🧠 AI Quant Workflows") {
                 self.active_workspace = ActiveWorkspace::AiWorkflows;
             }
@@ -448,23 +525,25 @@ impl eframe::App for MoneyCraftGui {
 
             ui.add_space(10.0);
             ui.separator();
+            ui.strong(egui::RichText::new("CRYPTO PERPS").color(amber));
+            for sym in &["BTC/USD", "ETH/USD", "SOL/USD"] {
+                let is_sel = self.selected_symbol == *sym;
+                if ui.selectable_label(is_sel, *sym).clicked() {
+                    self.selected_symbol = sym.to_string();
+                    self.fetch_market_feed();
+                    self.fetch_derivatives();
+                }
+            }
+
+            ui.add_space(10.0);
+            ui.separator();
             ui.strong(egui::RichText::new("FOREX DESK").color(amber));
             for sym in &["EUR/USD", "USD/JPY", "GBP/USD", "USD/CNY", "EUR/GBP"] {
                 let is_sel = self.selected_symbol == *sym;
                 if ui.selectable_label(is_sel, *sym).clicked() {
                     self.selected_symbol = sym.to_string();
                     self.fetch_market_feed();
-                }
-            }
-
-            ui.add_space(10.0);
-            ui.separator();
-            ui.strong(egui::RichText::new("CROSS ASSETS").color(amber));
-            for sym in &["BTC/USD", "ETH/USD", "SOL/USD", "NVDA", "SPY", "XAU/USD"] {
-                let is_sel = self.selected_symbol == *sym;
-                if ui.selectable_label(is_sel, *sym).clicked() {
-                    self.selected_symbol = sym.to_string();
-                    self.fetch_market_feed();
+                    self.fetch_derivatives();
                 }
             }
         });
@@ -472,6 +551,8 @@ impl eframe::App for MoneyCraftGui {
         // 5. Central Panel
         egui::CentralPanel::default().show(ui, |ui| match self.active_workspace {
             ActiveWorkspace::Terminal => self.render_bloomberg_terminal(ui),
+            ActiveWorkspace::CryptoDerivatives => self.render_crypto_derivatives(ui),
+            ActiveWorkspace::FantasyTrading => self.render_fantasy_trading(ui),
             ActiveWorkspace::AiWorkflows => self.render_ai_workflows(ui),
             ActiveWorkspace::HoneypotAuditor => self.render_honeypot_auditor(ui),
             ActiveWorkspace::Backtester => self.render_backtester(ui),
@@ -513,8 +594,10 @@ impl eframe::App for MoneyCraftGui {
                 .collapsible(false)
                 .resizable(false)
                 .show(ui.ctx(), |ui| {
-                    ui.heading("MoneyCraft Sovereign Terminal v0.3.0");
+                    ui.heading("MoneyCraft Sovereign Terminal v0.4.0");
                     ui.label("Bloomberg-grade financial analysis, high-density time-series charting,");
+                    ui.label("Hyperliquid funding arbitrage & forward-looking liquidation heatmap,");
+                    ui.label("Fantasy paper trading futures desk (1x-50x leverage sandbox),");
                     ui.label("G10 Forex desk (EUR, USD, JPY, GBP, CNY), breaking news ticker,");
                     ui.label("agentic AI quantitative workflows, EVM honeypot auditor, and sovereign tax ledger.");
                     ui.separator();
@@ -741,12 +824,7 @@ impl MoneyCraftGui {
                 let (top, bot) = if y_open > y_close { (y_close, y_open) } else { (y_open, y_close) };
                 let body_h = (bot - top).max(1.5);
                 let candle_rect = Rect::from_center_size(Pos2::new(x, top + body_h * 0.5), Vec2::new(bar_w, body_h));
-
-                if is_bull {
-                    painter.rect_filled(candle_rect, 1.0, candle_color);
-                } else {
-                    painter.rect_filled(candle_rect, 1.0, candle_color);
-                }
+                painter.rect_filled(candle_rect, 1.0, candle_color);
             }
         }
 
@@ -876,6 +954,252 @@ impl MoneyCraftGui {
                     painter.text(Pos2::new(hud_rect.left() + 8.0, hud_rect.top() + 8.0), egui::Align2::LEFT_TOP, hud_txt, egui::FontId::monospace(11.0), Color32::WHITE);
                 }
             }
+        }
+    }
+
+    fn render_crypto_derivatives(&mut self, ui: &mut egui::Ui) {
+        let amber = Color32::from_rgb(255, 179, 0);
+        let green = Color32::from_rgb(0, 230, 118);
+        let red = Color32::from_rgb(255, 23, 68);
+        let cyan = Color32::from_rgb(0, 229, 255);
+
+        ui.heading(egui::RichText::new("🔥 CRYPTO PERPETUAL FUTURES & LIQUIDATION HEATMAP").color(amber));
+        ui.label("Institutional order flow, forward-looking liquidation cascades, and Hyperliquid funding arbitrage:");
+
+        ui.add_space(8.0);
+        if let Some(ref d_json) = self.derivatives_data {
+            if let Some(d) = d_json.get("derivatives") {
+                let mark = d["mark_price"].as_f64().unwrap_or(0.0);
+                let arb_apr = d["arbitrage_spread_apr_pct"].as_f64().unwrap_or(0.0);
+                let arb_long = d["best_arb_long_venue"].as_str().unwrap_or("");
+                let arb_short = d["best_arb_short_venue"].as_str().unwrap_or("");
+
+                // 1. Funding Arbitrage Banner
+                egui::Frame::group(ui.style()).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("⚡ DELTA-NEUTRAL FUNDING ARBITRAGE SPREAD:").strong().color(amber));
+                        ui.colored_label(green, format!("+{arb_apr:.2}% APR Yield"));
+                        ui.separator();
+                        ui.label(format!("Strategy: Long {arb_long} / Short {arb_short}"));
+                    });
+                });
+
+                ui.add_space(8.0);
+                ui.columns(2, |columns| {
+                    // Left Column: Multi-Exchange Funding Rates
+                    columns[0].strong(egui::RichText::new("PERP VENUE FUNDING RATES (8H / ANNUALIZED)").color(amber));
+                    columns[0].add_space(4.0);
+                    if let Some(rates) = d["funding_rates"].as_array() {
+                        egui::Grid::new("funding_rates_grid").striped(true).show(&mut columns[0], |ui| {
+                            ui.strong("Venue");
+                            ui.strong("8h Rate");
+                            ui.strong("Annual APR");
+                            ui.strong("Open Interest");
+                            ui.end_row();
+
+                            for r in rates {
+                                let v = r["venue"].as_str().unwrap_or("");
+                                let r8 = r["rate_8h_pct"].as_f64().unwrap_or(0.0);
+                                let apr = r["annualized_apr_pct"].as_f64().unwrap_or(0.0);
+                                let oi = r["open_interest_mil"].as_f64().unwrap_or(0.0);
+
+                                ui.label(v);
+                                ui.colored_label(if r8 >= 0.02 { green } else { cyan }, format!("{r8:.4}%"));
+                                ui.colored_label(if apr >= 20.0 { green } else { Color32::WHITE }, format!("{apr:.2}%"));
+                                ui.label(format!("${oi:.1}M"));
+                                ui.end_row();
+                            }
+                        });
+                    }
+
+                    // Right Column: Liquidation Heatmap Clusters
+                    columns[1].strong(egui::RichText::new("FORWARD-LOOKING LIQUIDATION HEATMAP").color(amber));
+                    columns[1].add_space(4.0);
+                    if let Some(bands) = d["liquidation_heatmap"].as_array() {
+                        egui::Grid::new("liq_heatmap_grid").striped(true).show(&mut columns[1], |ui| {
+                            ui.strong("Price Level");
+                            ui.strong("Cluster Type");
+                            ui.strong("Cascade Notional");
+                            ui.strong("Distance");
+                            ui.end_row();
+
+                            for b in bands {
+                                let p = b["price_level"].as_f64().unwrap_or(0.0);
+                                let side = b["side"].as_str().unwrap_or("");
+                                let vol = b["volume_notional_mil"].as_f64().unwrap_or(0.0);
+                                let dist = b["distance_pct"].as_f64().unwrap_or(0.0);
+
+                                let (label, col) = if side == "SHORT_LIQ" {
+                                    ("🔥 SHORT SQUEEZE", red)
+                                } else {
+                                    ("🩸 LONG FLUSH", green)
+                                };
+
+                                ui.label(format!("${p:.2}"));
+                                ui.colored_label(col, label);
+                                ui.label(format!("${vol:.1}M"));
+                                ui.colored_label(if dist >= 0.0 { green } else { red }, format!("{dist:+.1}%"));
+                                ui.end_row();
+                            }
+                        });
+                    }
+                });
+
+                ui.add_space(12.0);
+                ui.label(egui::RichText::new(format!("CURRENT MARK PRICE: ${mark:.2}")).size(14.0).strong().color(amber));
+            }
+        }
+    }
+
+    fn render_fantasy_trading(&mut self, ui: &mut egui::Ui) {
+        let amber = Color32::from_rgb(255, 179, 0);
+        let green = Color32::from_rgb(0, 230, 118);
+        let red = Color32::from_rgb(255, 23, 68);
+        let cyan = Color32::from_rgb(0, 229, 255);
+
+        ui.heading(egui::RichText::new("🎮 FANTASY PAPER TRADING ARENA (SPOT & 1x-50x LEVERAGED PERPS)").color(amber));
+        ui.label("Risk-free sovereign paper trading sandbox with realistic margin calls and simulated execution:");
+
+        ui.add_space(8.0);
+
+        let mut do_reset = false;
+        let mut do_open = false;
+        let mut close_id = None;
+
+        let pa_json = self.paper_account.clone();
+        if let Some(ref pa) = pa_json {
+            if let Some(acc) = pa.get("account") {
+                let equity = acc["total_equity"].as_f64().unwrap_or(0.0);
+                let avail = acc["available_balance"].as_f64().unwrap_or(0.0);
+                let margin = acc["margin_used"].as_f64().unwrap_or(0.0);
+                let un_pnl = acc["unrealized_pnl"].as_f64().unwrap_or(0.0);
+                let wins = acc["win_count"].as_u64().unwrap_or(0);
+                let losses = acc["loss_count"].as_u64().unwrap_or(0);
+
+                // Account Telemetry Header
+                egui::Frame::group(ui.style()).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(format!("EQUITY: ${equity:.2}")).size(15.0).strong());
+                        ui.colored_label(if un_pnl >= 0.0 { green } else { red }, format!("(PnL: {un_pnl:+.2})"));
+                        ui.separator();
+                        ui.label(format!("AVAILABLE: ${avail:.2}"));
+                        ui.label(format!("MARGIN USED: ${margin:.2}"));
+                        ui.separator();
+                        ui.colored_label(green, format!("WINS: {wins}"));
+                        ui.colored_label(red, format!("LOSSES: {losses}"));
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("🔄 Reset Account ($100k)").clicked() {
+                                do_reset = true;
+                            }
+                        });
+                    });
+                });
+
+                ui.add_space(10.0);
+                // Order Placement Ticket
+                egui::Frame::group(ui.style()).show(ui, |ui| {
+                    ui.strong(egui::RichText::new("NEW ORDER ENTRY TICKET").color(amber));
+                    ui.horizontal(|ui| {
+                        ui.label("Target Asset:");
+                        ui.colored_label(cyan, &self.selected_symbol);
+                        ui.separator();
+
+                        ui.label("Side:");
+                        if ui.selectable_label(self.paper_order_side == "LONG", egui::RichText::new("🟢 LONG / BUY").color(green)).clicked() {
+                            self.paper_order_side = "LONG".to_string();
+                        }
+                        if ui.selectable_label(self.paper_order_side == "SHORT", egui::RichText::new("🔴 SHORT / SELL").color(red)).clicked() {
+                            self.paper_order_side = "SHORT".to_string();
+                        }
+
+                        ui.separator();
+                        ui.label("Type:");
+                        if ui.selectable_label(self.paper_order_type == "PERP_FUTURES", "Perp Futures").clicked() {
+                            self.paper_order_type = "PERP_FUTURES".to_string();
+                        }
+                        if ui.selectable_label(self.paper_order_type == "SPOT", "Spot").clicked() {
+                            self.paper_order_type = "SPOT".to_string();
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Order Size:");
+                        ui.add(egui::DragValue::new(&mut self.paper_quantity).range(0.01..=1_000_000.0).speed(0.1));
+
+                        if self.paper_order_type == "PERP_FUTURES" {
+                            ui.separator();
+                            ui.label("Leverage Slider:");
+                            ui.add(egui::Slider::new(&mut self.paper_leverage, 1.0..=50.0).text("x Leverage"));
+                        }
+
+                        ui.separator();
+                        if ui.button(egui::RichText::new(format!("⚡ EXECUTE FANTASY {} ORDER", self.paper_order_side)).color(amber).strong()).clicked() {
+                            do_open = true;
+                        }
+                    });
+                });
+
+                ui.add_space(10.0);
+                // Active Positions Table
+                ui.strong(egui::RichText::new("ACTIVE FANTASY POSITIONS").color(amber));
+                if let Some(positions) = acc["positions"].as_array() {
+                    egui::Grid::new("paper_positions_grid").striped(true).show(ui, |ui| {
+                        ui.strong("ID");
+                        ui.strong("Symbol");
+                        ui.strong("Side");
+                        ui.strong("Leverage");
+                        ui.strong("Size");
+                        ui.strong("Entry");
+                        ui.strong("Mark");
+                        ui.strong("Liq Price");
+                        ui.strong("Margin");
+                        ui.strong("PnL (USD / %)");
+                        ui.strong("Action");
+                        ui.end_row();
+
+                        for pos in positions {
+                            let pid = pos["id"].as_str().unwrap_or("");
+                            let sym = pos["symbol"].as_str().unwrap_or("");
+                            let side = pos["side"].as_str().unwrap_or("");
+                            let lev = pos["leverage"].as_f64().unwrap_or(1.0);
+                            let qty = pos["quantity"].as_f64().unwrap_or(0.0);
+                            let entry = pos["entry_price"].as_f64().unwrap_or(0.0);
+                            let cur = pos["current_price"].as_f64().unwrap_or(0.0);
+                            let liq = pos["liquidation_price"].as_f64().unwrap_or(0.0);
+                            let marg = pos["margin_allocated"].as_f64().unwrap_or(0.0);
+                            let pnl = pos["unrealized_pnl"].as_f64().unwrap_or(0.0);
+                            let pnl_pct = pos["unrealized_pnl_pct"].as_f64().unwrap_or(0.0);
+
+                            ui.label(pid);
+                            ui.label(sym);
+                            ui.colored_label(if side == "LONG" { green } else { red }, side);
+                            ui.label(format!("{lev:.0}x"));
+                            ui.label(format!("{qty:.2}"));
+                            ui.label(format!("{entry:.2}"));
+                            ui.label(format!("{cur:.2}"));
+                            ui.colored_label(red, format!("{liq:.2}"));
+                            ui.label(format!("${marg:.1}"));
+                            ui.colored_label(if pnl >= 0.0 { green } else { red }, format!("{pnl:+.2} ({pnl_pct:+.1}%)"));
+
+                            if ui.small_button("❌ Close").clicked() {
+                                close_id = Some(pid.to_string());
+                            }
+                            ui.end_row();
+                        }
+                    });
+                }
+            }
+        }
+
+        if do_reset {
+            self.reset_paper_account();
+        }
+        if do_open {
+            self.open_paper_order();
+        }
+        if let Some(id) = close_id {
+            self.close_paper_position(&id);
         }
     }
 
