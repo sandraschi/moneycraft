@@ -50,6 +50,10 @@ pub enum DateRangePreset {
     Month3,
     YearToDate,
     Year1,
+    Year5,
+    Max1990,      // Since 1990 (35+ years)
+    Historic1850, // Back to 1850 (London Victorian Era, East India Co., 1857 Panic, 1866 Overend Gurney)
+    AllTime1720,  // Back to 1720 (South Sea Bubble, Exchange Alley)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,6 +87,10 @@ pub struct MoneyCraftGui {
     pub show_bollinger: bool,
     pub show_volume: bool,
     pub show_rsi: bool,
+    pub show_historic_panics: bool,
+
+    // Fleet-Standard i18n
+    pub locale: moneycraft_core::i18n::AppLocale,
 
     // Multi-Symbol Comparison Engine
     pub comparison_symbols: Vec<String>,
@@ -161,6 +169,8 @@ impl MoneyCraftGui {
             show_bollinger: true,
             show_volume: true,
             show_rsi: true,
+            show_historic_panics: true,
+            locale: moneycraft_core::i18n::AppLocale::En,
             comparison_symbols: vec!["DJIA".to_string(), "SPX".to_string(), "KOSPI".to_string(), "DAX".to_string()],
             comparison_data: None,
             news_index: 0,
@@ -235,6 +245,10 @@ impl MoneyCraftGui {
             DateRangePreset::Month3 => 90,
             DateRangePreset::YearToDate => 120,
             DateRangePreset::Year1 => 180,
+            DateRangePreset::Year5 => 240,
+            DateRangePreset::Max1990 => 300,
+            DateRangePreset::Historic1850 => 350,
+            DateRangePreset::AllTime1720 => 400,
         };
         self.fetch_market_feed();
         self.fetch_multi_comparison();
@@ -497,6 +511,19 @@ impl eframe::App for MoneyCraftGui {
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(egui::RichText::new(format!("PORT: {CONTROL_PORT}")).monospace().color(amber));
+                    ui.separator();
+
+                    // Fleet Standard i18n Language Switcher
+                    let cur_loc = self.locale;
+                    let label = format!("{} {}", cur_loc.flag(), cur_loc.code().to_uppercase());
+                    egui::ComboBox::from_id_salt("topbar_locale_selector")
+                        .selected_text(label)
+                        .show_ui(ui, |ui| {
+                            for loc in moneycraft_core::i18n::AppLocale::all() {
+                                let text = format!("{} {}", loc.flag(), loc.display_name());
+                                let _ = ui.selectable_value(&mut self.locale, *loc, text);
+                            }
+                        });
                 });
             });
         });
@@ -570,44 +597,47 @@ impl eframe::App for MoneyCraftGui {
                 ui.selectable_label(active, rich).clicked()
             };
 
-            if nav_btn(ui, self.active_workspace == ActiveWorkspace::PersonalWealth, "💶 Personal Wealth & Inflation") {
+            let loc = self.locale;
+            use moneycraft_core::i18n::{t, I18nKey};
+
+            if nav_btn(ui, self.active_workspace == ActiveWorkspace::PersonalWealth, t(I18nKey::NavPersonalWealth, loc)) {
                 self.active_workspace = ActiveWorkspace::PersonalWealth;
                 self.run_wealth_simulation();
             }
-            if nav_btn(ui, self.active_workspace == ActiveWorkspace::Terminal, "📊 Time-Series Terminal") {
+            if nav_btn(ui, self.active_workspace == ActiveWorkspace::Terminal, t(I18nKey::NavTerminal, loc)) {
                 self.active_workspace = ActiveWorkspace::Terminal;
                 self.fetch_market_feed();
             }
-            if nav_btn(ui, self.active_workspace == ActiveWorkspace::DataSources, "📡 Data Sources & Payola") {
+            if nav_btn(ui, self.active_workspace == ActiveWorkspace::DataSources, t(I18nKey::NavDataSources, loc)) {
                 self.active_workspace = ActiveWorkspace::DataSources;
             }
-            if nav_btn(ui, self.active_workspace == ActiveWorkspace::MultiComparison, "📈 Multi-Asset Compare") {
+            if nav_btn(ui, self.active_workspace == ActiveWorkspace::MultiComparison, t(I18nKey::NavMultiCompare, loc)) {
                 self.active_workspace = ActiveWorkspace::MultiComparison;
                 self.fetch_multi_comparison();
             }
-            if nav_btn(ui, self.active_workspace == ActiveWorkspace::CryptoDerivatives, "🔥 Crypto Perps & Heatmap") {
+            if nav_btn(ui, self.active_workspace == ActiveWorkspace::CryptoDerivatives, t(I18nKey::NavCryptoDerivatives, loc)) {
                 self.active_workspace = ActiveWorkspace::CryptoDerivatives;
                 self.fetch_derivatives();
             }
-            if nav_btn(ui, self.active_workspace == ActiveWorkspace::FantasyTrading, "🎮 Fantasy Futures Sandbox") {
+            if nav_btn(ui, self.active_workspace == ActiveWorkspace::FantasyTrading, t(I18nKey::NavFantasyTrading, loc)) {
                 self.active_workspace = ActiveWorkspace::FantasyTrading;
                 self.fetch_paper_account();
             }
-            if nav_btn(ui, self.active_workspace == ActiveWorkspace::AiWorkflows, "🧠 AI Quant Workflows") {
+            if nav_btn(ui, self.active_workspace == ActiveWorkspace::AiWorkflows, t(I18nKey::NavAiWorkflows, loc)) {
                 self.active_workspace = ActiveWorkspace::AiWorkflows;
             }
-            if nav_btn(ui, self.active_workspace == ActiveWorkspace::HoneypotAuditor, "🛡️ EVM Honeypot Auditor") {
+            if nav_btn(ui, self.active_workspace == ActiveWorkspace::HoneypotAuditor, t(I18nKey::NavHoneypotAuditor, loc)) {
                 self.active_workspace = ActiveWorkspace::HoneypotAuditor;
             }
-            if nav_btn(ui, self.active_workspace == ActiveWorkspace::Backtester, "⚙️ Quantitative Backtester") {
+            if nav_btn(ui, self.active_workspace == ActiveWorkspace::Backtester, t(I18nKey::NavBacktester, loc)) {
                 self.active_workspace = ActiveWorkspace::Backtester;
             }
-            if nav_btn(ui, self.active_workspace == ActiveWorkspace::PortfolioLedger, "💼 Sovereign Portfolio") {
+            if nav_btn(ui, self.active_workspace == ActiveWorkspace::PortfolioLedger, t(I18nKey::NavPortfolioLedger, loc)) {
                 self.active_workspace = ActiveWorkspace::PortfolioLedger;
                 self.fetch_portfolio();
             }
 
-            ui.add_space(10.0);
+            ui.add_space(8.0);
             ui.separator();
             ui.strong(egui::RichText::new("GLOBAL INDICES").color(amber));
             for sym in &["DJIA", "SPX", "NDX", "DAX", "N225", "KOSPI", "FTSE", "HSI"] {
@@ -619,7 +649,7 @@ impl eframe::App for MoneyCraftGui {
                 }
             }
 
-            ui.add_space(10.0);
+            ui.add_space(8.0);
             ui.separator();
             ui.strong(egui::RichText::new("FOREX DESK").color(amber));
             for sym in &["EUR/USD", "USD/JPY", "GBP/USD", "USD/CNY", "EUR/GBP"] {
@@ -628,6 +658,51 @@ impl eframe::App for MoneyCraftGui {
                     self.selected_symbol = sym.to_string();
                     self.fetch_market_feed();
                     self.fetch_derivatives();
+                }
+            }
+
+            ui.add_space(8.0);
+            ui.separator();
+            ui.strong(egui::RichText::new("📜 HISTORIC PAPERS (LONDON)").color(amber));
+            for (sym, desc) in &[
+                ("EIC", "Honourable East India Co. (1600-1874)"),
+                ("UK_CONSOLS", "Bank of England 3% Consols (1751+)"),
+                ("SOUTH_SEA", "South Sea Company (1711-1720)"),
+            ] {
+                let is_sel = self.selected_symbol == *sym;
+                if ui.selectable_label(is_sel, format!("{sym} - {desc}")).clicked() {
+                    self.selected_symbol = sym.to_string();
+                    self.date_preset = DateRangePreset::Historic1850;
+                    self.set_date_preset(DateRangePreset::Historic1850);
+                    self.show_historic_panics = true;
+                }
+            }
+
+            ui.add_space(8.0);
+            ui.separator();
+            ui.strong(egui::RichText::new("🚩 HISTORIC PANICS").color(red));
+            for (year, name) in &[
+                (1720, "1720: South Sea Bubble"),
+                (1825, "1825: Latin American / Poyais"),
+                (1847, "1847: Railway Mania"),
+                (1857, "1857: Telegraph Panic"),
+                (1866, "1866: Overend Gurney"),
+                (1873, "1873: Gründerkrach"),
+                (1929, "1929: Wall Street Crash"),
+                (1987, "1987: Black Monday"),
+                (2008, "2008: Global Financial Crisis"),
+                (2020, "2020: Covid Liquidity Shock"),
+            ] {
+                if ui.button(format!("{name}")).clicked() {
+                    self.show_historic_panics = true;
+                    if *year < 1850 {
+                        self.set_date_preset(DateRangePreset::AllTime1720);
+                    } else if *year < 1990 {
+                        self.set_date_preset(DateRangePreset::Historic1850);
+                    } else {
+                        self.set_date_preset(DateRangePreset::Max1990);
+                    }
+                    self.status_message = format!("Inspecting Crisis Year {year}: {name}");
                 }
             }
         });
@@ -1102,6 +1177,21 @@ impl MoneyCraftGui {
             if ui.selectable_label(self.date_preset == DateRangePreset::Year1, "1Y").clicked() {
                 self.set_date_preset(DateRangePreset::Year1);
             }
+            if ui.selectable_label(self.date_preset == DateRangePreset::Year5, "5Y").clicked() {
+                self.set_date_preset(DateRangePreset::Year5);
+            }
+            if ui.selectable_label(self.date_preset == DateRangePreset::Max1990, "MAX (1990)").clicked() {
+                self.set_date_preset(DateRangePreset::Max1990);
+                self.show_historic_panics = true;
+            }
+            if ui.selectable_label(self.date_preset == DateRangePreset::Historic1850, "HISTORIC (1850)").clicked() {
+                self.set_date_preset(DateRangePreset::Historic1850);
+                self.show_historic_panics = true;
+            }
+            if ui.selectable_label(self.date_preset == DateRangePreset::AllTime1720, "ALL-TIME (1720)").clicked() {
+                self.set_date_preset(DateRangePreset::AllTime1720);
+                self.show_historic_panics = true;
+            }
 
             ui.separator();
             ui.label(egui::RichText::new("STYLE:").color(amber).monospace());
@@ -1122,6 +1212,7 @@ impl MoneyCraftGui {
             ui.toggle_value(&mut self.show_bollinger, egui::RichText::new("BBands").color(purple));
             ui.toggle_value(&mut self.show_volume, "Vol");
             ui.toggle_value(&mut self.show_rsi, "RSI");
+            ui.toggle_value(&mut self.show_historic_panics, egui::RichText::new("🚩 Panics").color(red));
         });
         ui.separator();
 
@@ -1369,6 +1460,70 @@ impl MoneyCraftGui {
                 let h = ((v / safe_max_vol) as f32 * (vol_height - 6.0)).max(1.0);
                 let v_rect = Rect::from_min_max(Pos2::new(x - bar_w * 0.45, vol_bottom - h), Pos2::new(x + bar_w * 0.45, vol_bottom));
                 painter.rect_filled(v_rect, 0.5, c_color);
+            }
+        }
+
+        // Historic Panics Vertical Marker Overlays
+        if self.show_historic_panics {
+            let panics = moneycraft_core::history::MarketHistory::all_panics();
+            // Determine time span based on current date preset
+            let (start_year, end_year) = match self.date_preset {
+                DateRangePreset::AllTime1720 => (1720.0, 2026.0),
+                DateRangePreset::Historic1850 => (1850.0, 2026.0),
+                DateRangePreset::Max1990 => (1990.0, 2026.0),
+                DateRangePreset::Year5 => (2021.0, 2026.0),
+                DateRangePreset::Year1 => (2025.0, 2026.0),
+                _ => (2025.0, 2026.0),
+            };
+
+            for p in &panics {
+                let py = p.year as f64;
+                if py >= start_year && py <= end_year {
+                    let norm = (py - start_year) / (end_year - start_year);
+                    let px = rect.left() + margin_left + (norm as f32) * total_w;
+
+                    // Crimson vertical line with marker flag at top
+                    painter.line_segment(
+                        [Pos2::new(px, main_top), Pos2::new(px, main_bottom)],
+                        Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 23, 68, 160)),
+                    );
+
+                    // Panic Badge Banner
+                    let badge_rect = Rect::from_min_size(Pos2::new(px - 16.0, main_top + 4.0), Vec2::new(32.0, 14.0));
+                    painter.rect_filled(badge_rect, 2.0, Color32::from_rgb(180, 15, 45));
+                    painter.text(
+                        badge_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        format!("{}", p.year),
+                        egui::FontId::monospace(9.0),
+                        Color32::WHITE,
+                    );
+
+                    // Hover tooltip trigger if mouse is near vertical marker line
+                    if let Some(mouse_pos) = response.hover_pos() {
+                        if (mouse_pos.x - px).abs() < 12.0 && mouse_pos.y >= main_top && mouse_pos.y <= main_bottom {
+                            let tip_w = 340.0;
+                            let tip_h = 130.0;
+                            let tip_x = (px + 10.0).min(rect.right() - tip_w - 10.0);
+                            let tip_rect = Rect::from_min_size(Pos2::new(tip_x, mouse_pos.y.min(main_bottom - tip_h)), Vec2::new(tip_w, tip_h));
+
+                            painter.rect_filled(tip_rect, 4.0, Color32::from_rgba_unmultiplied(15, 18, 26, 245));
+                            painter.rect_stroke(tip_rect, 4.0, Stroke::new(1.0, Color32::from_rgb(255, 23, 68)), egui::StrokeKind::Inside);
+
+                            let tip_txt = format!(
+                                "🚩 CRISIS: {}\nDATE: {} | DROP: {:.1}%\nEPICENTER: {}\nCATALYST: {}\nLESSON: {}",
+                                p.name, p.date_str, p.peak_to_trough_drop_pct, p.epicenter, p.primary_catalyst, p.lessons_for_modern_quants
+                            );
+                            painter.text(
+                                Pos2::new(tip_rect.left() + 8.0, tip_rect.top() + 8.0),
+                                egui::Align2::LEFT_TOP,
+                                tip_txt,
+                                egui::FontId::proportional(11.0),
+                                Color32::WHITE,
+                            );
+                        }
+                    }
+                }
             }
         }
 

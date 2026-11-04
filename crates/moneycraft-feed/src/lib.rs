@@ -158,13 +158,21 @@ impl MarketFeed {
             ("NVDA", "Nvidia Corporation", "EQUITY"),
             ("SPY", "SPDR S&P 500 ETF Trust", "EQUITY"),
             ("XAU/USD", "Gold Bullion / USD", "COMMODITY"),
+            // Historical Instruments (London Exchange Alley & British Empire)
+            ("EIC", "Honourable East India Company (London, 1600-1874)", "HISTORIC"),
+            ("UK_CONSOLS", "Bank of England 3% Consols & UK Index (1850+)", "HISTORIC"),
+            ("SOUTH_SEA", "South Sea Company Stock (London, 1711-1720)", "HISTORIC"),
         ]
     }
 
-    /// Generates high-density time-series candlestick data with arbitrary count (10 to 180 bars).
+    /// Generates high-density time-series candlestick data with arbitrary count (10 to 400 bars).
     #[must_use]
     pub fn mock_candles_with_count(symbol: &str, count: usize) -> Vec<CandleBar> {
         let (base_price, volatility) = match symbol.to_uppercase().as_str() {
+            // Historical British Empire & London Papers
+            "EIC" | "EAST_INDIA" => (245.0, 4.5),
+            "UK_CONSOLS" | "CONSOLS" => (94.5, 0.85),
+            "SOUTH_SEA" => (280.0, 18.0),
             // Global Indices
             "DJIA" | "^DJI" | "DOW" => (42_200.0, 120.0),
             "SPX" | "^GSPC" | "S&P" => (5_860.0, 22.0),
@@ -190,7 +198,7 @@ impl MarketFeed {
             _ => (96450.0, 480.0), // BTC/USD default
         };
 
-        let clamped_count = count.clamp(10, 180);
+        let clamped_count = count.clamp(10, 400);
         let mut candles = Vec::with_capacity(clamped_count + 4);
         let base_timestamp: u64 = 1762200000000;
         let mut curr_close = base_price * 0.985;

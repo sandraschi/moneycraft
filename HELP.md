@@ -1,8 +1,8 @@
 # MoneyCraft Comprehensive User Guide & Reference Manual
 
 **MoneyCraft Sovereign Financial Intelligence Terminal**  
-**Version**: 0.6.0  
-**Domain**: Quantitative Finance, Personal Wealth & Inflation Simulator (Girokonto, Festgeld, Bausparer), Global Indices Desk (Dow Jones, S&P 500, Nasdaq, DAX, Nikkei 225, KOSPI, FTSE, Hang Seng), Multi-Asset Comparison Graphs, Date-Range Presets (1D, 1W, 1M, 3M, YTD, 1Y), G10 Forex Desk, Crypto Derivatives (Hyperliquid Arbitrage & Liquidation Heatmaps), Fantasy Futures Paper Trading Sandbox, EVM Honeypot Defense, Sovereign Tax Accounting  
+**Version**: 0.7.0  
+**Domain**: Quantitative Finance, Fleet-Standard i18n Localization (7 Languages), Historical Deep-Archive (1720–2026), 19 Major Financial Panics Catalog & Chart Annotations, Personal Wealth & Inflation Simulator (Girokonto, Festgeld, Bausparer), Global Indices Desk (Dow Jones, S&P 500, Nasdaq, DAX, Nikkei 225, KOSPI, FTSE, Hang Seng), Historic London Sovereign Papers (East India Co, Consols, South Sea Bubble), Multi-Asset Comparison Graphs, Arbitrary Date-Range Presets (1D to 300+ Years), G10 Forex Desk, Crypto Derivatives (Hyperliquid Arbitrage & Liquidation Heatmaps), Fantasy Futures Paper Trading Sandbox, EVM Honeypot Defense, Sovereign Tax Accounting  
 **Control Port**: `14117`
 
 ---
@@ -164,3 +164,50 @@ MoneyCraft is a sovereign, zero-subscription, local-first quantitative finance t
 - `NVDA`: Nvidia Corporation
 - `SPY`: S&P 500 ETF Trust
 - `XAU/USD`: Gold Bullion / US Dollar
+
+### 📜 Historic London Sovereign Papers & Deep-Archive (1720–1874)
+- `EIC`: **Honourable East India Company Stock (1600–1874)**: The world's first mega-corporation, chartered by Queen Elizabeth I, commanding a 260,000-man private army before dissolution in 1874.
+- `UK_CONSOLS`: **Bank of England 3% Consolidated Annuities (1751+)**: The longest uninterrupted sovereign bond in human history, funding the British Empire and Napoleonic Wars without default.
+- `SOUTH_SEA`: **South Sea Company (1711–1720)**: The British sovereign debt swap equity vehicle that precipitated the famous 1720 South Sea Bubble and Bubble Act.
+
+---
+
+## 5. Fleet-Standard i18n Localization Architecture
+
+Following the Storytold Craft applications (such as *GameCraft*, *QGISCraft*, and *DesignCraft*), MoneyCraft implements a pure-Rust, zero-runtime-overhead internationalization (i18n) engine:
+- **Zero Disk I/O & Zero Gettext Dependencies**: All localized strings are statically compiled into the binary via typed enums (`I18nKey`) and typed locales (`AppLocale`).
+- **Supported Locales**:
+  - 🇺🇸 `EN` (English - Sovereign Standard)
+  - 🇩🇪 `DE` (Deutsch - Girokonto, Festgeld & Bausparer)
+  - 🇫🇷 `FR` (Français)
+  - 🇪🇸 `ES` (Español)
+  - 🇯🇵 `JA` (日本語)
+  - 🇰🇷 `KO` (한국어 - KOSPI & FX)
+  - 🇨🇳 `ZH` (中文)
+- **Instant Hot-Switching**: Selectable directly from the top header bar dropdown (`[🌐 🇺🇸 EN ▼]`), dynamically repainting the entire Bloomberg GUI in real time without restarting.
+
+---
+
+## 6. The 19 Historic Financial Panics (1720 to 2026)
+
+MoneyCraft includes interactive chart annotations, vertical timeline flags, catalyst autopsies, and modern quant risk takeaways for the 19 greatest financial market crises:
+1. **1720: The South Sea Bubble & Mississippi Collapse** (-84.0%, Exchange Alley & Paris) — Newton's folly and John Law's fiat credit expansion.
+2. **1772: London Credit Crisis** (-38.0%, Lombard Street) — Alexander Fordyce EIC short squeeze dominoes across Ayr Bank and triggers the Boston Tea Party.
+3. **1825: Latin American Sovereign Bubble & Poyais Fraud** (-45.0%, London Stock Exchange) — Fictitious Poyais bonds and Bank of England near-exhaustion.
+4. **1837: Panic of 1837 & Great Deflation** (-42.0%, New York & New Orleans) — Jackson's Specie Circular and collapse of 600 banks.
+5. **1847: Railway Mania Collapse** (-67.0%, Great George Street) — Margin calls on duplicate railway lines; Bank Charter Act of 1844 suspended.
+6. **1857: Panic of 1857 (First World Telegraph Panic)** (-35.0%, Wall Street & London) — Sinking of SS Central America with 30,000 lbs gold; instant electric wire panic.
+7. **1866: Overend Gurney Collapse & Black Friday** (-42.0%, Lombard Street) — "The Bankers' Bank" implosion; Bagehot's classical lender-of-last-resort doctrine established.
+8. **1873: Panic of 1873 & Gründerkrach** (-48.0%, Vienna Börse & NYSE) — Jay Cooke failure, silver demonetization, and EIC 1874 dissolution.
+9. **1890: Baring Crisis** (-32.0%, London & Buenos Aires) — Barings underwriting of Argentine sovereign debt averted by Bank of England consortium.
+10. **1893: Panic of 1893 (Silver Repeal)** (-37.0%, Wall Street) — Philadelphia and Reading Railroad bankruptcy and US Treasury gold drain.
+11. **1907: Panic of 1907 (Knickerbocker Run)** (-49.0%, Wall Street) — F. Augustus Heinze copper corner; J.P. Morgan's private rescue leads to the 1913 Federal Reserve Act.
+12. **1929: The Great Crash & Great Depression** (-89.2%, Wall Street & Worldwide) — Black Tuesday, margin liquidations, Smoot-Hawley tariffs, and 4-year deflationary collapse.
+13. **1973: First Oil Shock & Stagflation Crash** (-48.2%, Global) — OPEC embargo, end of Bretton Woods gold convertibility, and stagflation.
+14. **1987: Black Monday & Portfolio Insurance Cascade** (-33.5%, NYSE & Global) — Algorithmic constant-mix portfolio insurance stop-loss execution cascade (-22.6% in 1 day).
+15. **1997: Asian Financial Crisis (Tom Yam Kung)** (-65.0%, Bangkok, Seoul, Jakarta, HK) — Break of currency pegs and Korean KOSPI crash.
+16. **1998: Russian Ruble Default & LTCM Liquidation** (-22.0%, Moscow & Greenwich CT) — Gaussian VaR underestimating fat tails; 100:1 leverage blowout.
+17. **2000: Dot-Com Tech Bubble Crash** (-78.4%, NASDAQ) — Speculative frenzy in non-profitable internet IPOs with extreme price-to-eyeball multiples.
+18. **2008: Global Financial Crisis (Lehman Bankruptcy)** (-56.8%, Wall Street & Global) — Subprime MBS/CDO securitization run and birth of ZIRP / Quantitative Easing.
+19. **2020: Covid-19 Liquidity Shock & Negative Oil Flash** (-34.0%, Global) — Fastest 30% drop in market history; WTI crude flash to -$37.63/bbl.
+20. **2022: Global Inflation & Rate Hiking Shock (SVB Run)** (-25.4%, US Treasuries & Tech) — Fastest 500 bps Fed hikes in 40 years; social-media bank run on Silicon Valley Bank.

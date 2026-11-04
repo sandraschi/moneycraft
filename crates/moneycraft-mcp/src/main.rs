@@ -54,6 +54,10 @@ enum Commands {
     },
     /// Inspect private sovereign portfolio PnL and active positions
     Portfolio,
+    /// List historical financial crises and systemic market panics (1720-2026)
+    Panics,
+    /// List historical papers and indices (London East India Co, Consols, South Sea)
+    HistoricInstruments,
     /// Simulate personal wealth growth and real purchasing power erosion against inflation
     SimulateWealth {
         #[arg(long, default_value_t = 2000.0)]
@@ -121,6 +125,14 @@ fn main() {
         }
         Some(Commands::Portfolio) => {
             let res = rt.block_on(dispatch(Command::PortfolioSummary, &store));
+            println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
+        }
+        Some(Commands::Panics) => {
+            let res = rt.block_on(dispatch(Command::GetHistoricPanics, &store));
+            println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
+        }
+        Some(Commands::HistoricInstruments) => {
+            let res = rt.block_on(dispatch(Command::GetHistoricInstruments, &store));
             println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
         }
         Some(Commands::SimulateWealth {
@@ -238,6 +250,8 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
                             }
                         },
                         { "name": "finance_portfolio", "description": "Inspect private sovereign portfolio PnL and active positions", "inputSchema": { "type": "object", "properties": {} } },
+                        { "name": "finance_historic_panics", "description": "List all 19 major historical financial crises and market panics from 1720 South Sea Bubble to modern day", "inputSchema": { "type": "object", "properties": {} } },
+                        { "name": "finance_historic_instruments", "description": "List historical London Exchange Alley sovereign papers and equities (EIC, Consols, South Sea)", "inputSchema": { "type": "object", "properties": {} } },
                         {
                             "name": "finance_simulate_personal_wealth",
                             "description": "Simulate beginner personal wealth compounding across checking, festgeld, and bausparer vs true inflation erosion",
@@ -285,6 +299,8 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
                         rt.block_on(dispatch(Command::RunBacktest { strategy: strat, symbol: sym, initial_capital: cap }, store))
                     }
                     "finance_portfolio" => rt.block_on(dispatch(Command::PortfolioSummary, store)),
+                    "finance_historic_panics" => rt.block_on(dispatch(Command::GetHistoricPanics, store)),
+                    "finance_historic_instruments" => rt.block_on(dispatch(Command::GetHistoricInstruments, store)),
                     "finance_simulate_personal_wealth" => {
                         let cfg = moneycraft_core::PersonalWealthConfig {
                             monthly_income_eur: args["income"].as_f64().unwrap_or(2000.0),

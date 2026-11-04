@@ -12,13 +12,16 @@
 #![deny(clippy::unimplemented)]
 #![deny(clippy::todo)]
 
+pub mod history;
+pub mod i18n;
+
 use databasecraft_store::DatabaseStore;
 use moneycraft_feed::MarketFeed;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 pub const CONTROL_PORT: u16 = 14117;
-pub const APP_VERSION: &str = "0.6.0";
+pub const APP_VERSION: &str = "0.7.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersonalWealthConfig {
@@ -101,6 +104,8 @@ pub struct PaperAccountState {
 pub enum Command {
     Status,
     ListDataSources,
+    GetHistoricPanics,
+    GetHistoricInstruments,
     GetMarketFeed {
         symbol: String,
         bar_count: Option<usize>,
@@ -284,6 +289,22 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
                 "success": true,
                 "count": sources.len(),
                 "sources": sources
+            })
+        }
+        Command::GetHistoricPanics => {
+            let panics = history::MarketHistory::all_panics();
+            json!({
+                "success": true,
+                "count": panics.len(),
+                "panics": panics
+            })
+        }
+        Command::GetHistoricInstruments => {
+            let instrs = history::MarketHistory::historical_instruments();
+            json!({
+                "success": true,
+                "count": instrs.len(),
+                "instruments": instrs
             })
         }
         Command::SimulatePersonalWealth { config } => {
