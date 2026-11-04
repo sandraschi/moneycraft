@@ -37,6 +37,12 @@ pub struct MoneyCraftGui {
     pub backtest_result: Option<Value>,
     pub portfolio_data: Option<Value>,
     pub status_message: String,
+    pub is_dark_theme: bool,
+    pub is_authenticated: bool,
+    pub auth_username: String,
+    pub auth_password_input: String,
+    pub show_auth_modal: bool,
+    pub show_about_dialog: bool,
 }
 
 impl MoneyCraftGui {
@@ -55,6 +61,12 @@ impl MoneyCraftGui {
             backtest_result: None,
             portfolio_data: None,
             status_message: format!("MoneyCraft v{APP_VERSION} [Control Port {CONTROL_PORT} Active]"),
+            is_dark_theme: true,
+            is_authenticated: false,
+            auth_username: "quant_trader".to_string(),
+            auth_password_input: String::new(),
+            show_auth_modal: false,
+            show_about_dialog: false,
         };
         app.fetch_market_feed();
         app.fetch_portfolio();
@@ -93,9 +105,89 @@ impl MoneyCraftGui {
 
 impl eframe::App for MoneyCraftGui {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if self.is_dark_theme {
+            ui.ctx().set_visuals(egui::Visuals::dark());
+        } else {
+            ui.ctx().set_visuals(egui::Visuals::light());
+        }
+
         let gold = Color32::from_rgb(251, 191, 36);
         let green = Color32::from_rgb(16, 185, 129);
         let red = Color32::from_rgb(239, 68, 68);
+
+        // 0. Desktop Menu Bar
+        egui::Panel::top("desktop_menu_bar").show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.menu_button("File", |ui| {
+                    if ui.button("Sync Sovereign Ledger").clicked() {
+                        self.fetch_portfolio();
+                        ui.close();
+                    }
+                    if ui.button("Refresh High-Density Feed").clicked() {
+                        self.fetch_market_feed();
+                        ui.close();
+                    }
+                    ui.separator();
+                    if ui.button("Exit").clicked() {
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                });
+
+                ui.menu_button("Markets", |ui| {
+                    for sym in &["BTC/USD", "ETH/USD", "SOL/USD", "NVDA", "XAU/USD"] {
+                        if ui.button(*sym).clicked() {
+                            self.selected_symbol = sym.to_string();
+                            self.fetch_market_feed();
+                            ui.close();
+                        }
+                    }
+                });
+
+                ui.menu_button("View", |ui| {
+                    let theme_label = if self.is_dark_theme { "☀ Switch to Light Theme" } else { "🌙 Switch to Dark Theme" };
+                    if ui.button(theme_label).clicked() {
+                        self.is_dark_theme = !self.is_dark_theme;
+                        ui.close();
+                    }
+                });
+
+                ui.menu_button("Security", |ui| {
+                    if self.is_authenticated {
+                        ui.label(format!("Trader: {}", self.auth_username));
+                        if ui.button("Sign Out").clicked() {
+                            self.is_authenticated = false;
+                            self.status_message = "Signed out".to_string();
+                            ui.close();
+                        }
+                    } else {
+                        if ui.button("Basic Auth Login...").clicked() {
+                            self.show_auth_modal = true;
+                            ui.close();
+                        }
+                    }
+                });
+
+                ui.menu_button("Help", |ui| {
+                    if ui.button("About MoneyCraft").clicked() {
+                        self.show_about_dialog = true;
+                        ui.close();
+                    }
+                });
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let (icon, label) = if self.is_dark_theme { ("☀", "Light") } else { ("🌙", "Dark") };
+                    if ui.small_button(format!("{icon} {label}")).clicked() {
+                        self.is_dark_theme = !self.is_dark_theme;
+                    }
+
+                    if self.is_authenticated {
+                        ui.colored_label(gold, format!("💰 {}", self.auth_username));
+                    } else if ui.small_button("🔑 Login").clicked() {
+                        self.show_auth_modal = true;
+                    }
+                });
+            });
+        });
 
         // 1. Top Bar
         egui::Panel::top("finance_top_bar").show(ui, |ui| {
@@ -298,6 +390,57 @@ impl eframe::App for MoneyCraftGui {
                 }
             }
         });
+
+        // Modal: Basic Auth Login
+        if self.show_auth_modal {
+            egui::Window::new("🔐 Sovereign Financial Auth")
+                .collapsible(false)
+                .resizable(false)
+                .show(ui.ctx(), |ui| {
+                    ui.label("Authenticate for Live Execution & Private Ledger:");
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        ui.label("User:");
+                        ui.text_edit_singleline(&mut self.auth_username);
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Pass:");
+                        ui.add(egui::TextEdit::singleline(&mut self.auth_password_input).password(true));
+                    });
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("Confirm").clicked() {
+                            if !self.auth_username.is_empty() {
+                                self.is_authenticated = true;
+                                self.show_auth_modal = false;
+                                self.status_message = format!("Signed in as {}", self.auth_username);
+                            }
+                        }
+                        if ui.button("Cancel").clicked() {
+                            self.show_auth_modal = false;
+                        }
+                    });
+                });
+        }
+
+        // Modal: About Dialog
+        if self.show_about_dialog {
+            egui::Window::new("ℹ About MoneyCraft")
+                .collapsible(false)
+                .resizable(false)
+                .show(ui.ctx(), |ui| {
+                    ui.heading("MoneyCraft Sovereign Terminal");
+                    ui.label("High-density quantitative finance studio.");
+                    ui.label(format!("Version: v{APP_VERSION}"));
+                    ui.label(format!("Control Port: {CONTROL_PORT}"));
+                    ui.separator();
+                    ui.label("Subsumes Bloomberg Terminal & Honeypot scanners into sovereign local Rust engine.");
+                    ui.add_space(8.0);
+                    if ui.button("Close").clicked() {
+                        self.show_about_dialog = false;
+                    }
+                });
+        }
     }
 }
 
