@@ -1,6 +1,6 @@
-# MoneyCraft: Sovereign Financial Intelligence & Quantitative Terminal
+# MoneyCraft: Local-First Financial Intelligence & Quantitative Terminal
 
-**MoneyCraft** is an offline-first, pure-Rust quantitative finance studio, Bloomberg-grade time-series terminal, and sovereign algorithmic workbench for the sandraschi fleet.
+**MoneyCraft** is an offline-first, pure-Rust quantitative finance studio, Bloomberg-grade time-series terminal, and local-first algorithmic workbench for the sandraschi fleet.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -13,14 +13,14 @@
 │ ⏱️ Date Range Presets       | 1D, 1W, 1M, 3M, YTD, 1Y Presets          │
 │ 📊 Time-Series Terminal     | 🕯️ Candlesticks, Mountain Area, Heikin-Ashi│
 │ 📈 Technical Indicators     | SMA 20, EMA 50, Bollinger Bands, Vol, RSI│
-│ 💱 Sovereign Forex Desk     | EUR/USD, USD/JPY, GBP/USD, USD/CNY, EUR/GBP│
+│ 💱 Forex Desk     | EUR/USD, USD/JPY, GBP/USD, USD/CNY, EUR/GBP│
 │ 🔥 Crypto Derivatives Desk  | Hyperliquid Funding Arbitrage & Liq Map  │
 │ 🎮 Fantasy Paper Trading    | 1x–50x Leverage Futures & Spot Sandbox   │
 │ ⚡ Breaking News Wire       | Real-time Macro/FX wire with NLP Sentiment│
 │ 🧠 Agentic AI Quant Workflows| Strategy Gen, PORT Stress-Test, Alpha, SOR│
 │ 🛡️ EVM Honeypot Auditor    | Local Sandbox bytecode scam analyzer      │
 │ ⚙️ Monte Carlo Backtester  | 10,000-path simulation (Sharpe, Drawdown) │
-│ 💼 Sovereign Tax Ledger     | Offline FIFO/LIFO private balance sheet   │
+│ 💼 Local Tax Ledger     | Offline FIFO/LIFO private balance sheet   │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -46,7 +46,7 @@
    - Built-in technical indicators: SMA 20, EMA 50, Bollinger Bands ribbon (2σ), Volume profile, and RSI 14 oscillator.
    - Snapping crosshair HUD projecting time, open, high, low, close, and volume.
 
-2. **G10 Sovereign Forex Desk**:
+2. **G10 Forex Desk**:
    - Complete support for Euro (`EUR`), US Dollar (`USD`), Japanese Yen (`JPY`), British Pound (`GBP`), and Chinese Renminbi (`CNY/RMB`).
    - 4-decimal and 2-decimal pip scaling across chart axes and tooltips.
 
@@ -66,7 +66,7 @@
 6. **Microsecond Monte Carlo Backtester**:
    - 10,000-path algorithmic testing with win rates, maximum drawdowns, and Sharpe ratios.
 
-7. **Zero-Leakage Sovereign Portfolio Ledger**:
+7. **Zero-Leakage Local Portfolio Ledger**:
    - Local private SQLite database (backed by **DatabaseCraft** B-Trees).
    - Real-time FIFO/LIFO capital gains tax accounting.
 

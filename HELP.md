@@ -1,15 +1,15 @@
 # MoneyCraft Comprehensive User Guide & Reference Manual
 
-**MoneyCraft Sovereign Financial Intelligence Terminal**  
+**MoneyCraft Local-First Financial Intelligence Terminal**  
 **Version**: 0.7.0  
-**Domain**: Quantitative Finance, Fleet-Standard i18n Localization (7 Languages), Historical Deep-Archive (1720–2026), 19 Major Financial Panics Catalog & Chart Annotations, Personal Wealth & Inflation Simulator (Girokonto, Festgeld, Bausparer), Global Indices Desk (Dow Jones, S&P 500, Nasdaq, DAX, Nikkei 225, KOSPI, FTSE, Hang Seng), Historic London Sovereign Papers (East India Co, Consols, South Sea Bubble), Multi-Asset Comparison Graphs, Arbitrary Date-Range Presets (1D to 300+ Years), G10 Forex Desk, Crypto Derivatives (Hyperliquid Arbitrage & Liquidation Heatmaps), Fantasy Futures Paper Trading Sandbox, EVM Honeypot Defense, Sovereign Tax Accounting  
+**Domain**: Quantitative Finance, Fleet-Standard i18n Localization (7 Languages), Historical Deep-Archive (1720–2026), 19 Major Financial Panics Catalog & Chart Annotations, Personal Wealth & Inflation Simulator (Girokonto, Festgeld, Bausparer), Global Indices Desk (Dow Jones, S&P 500, Nasdaq, DAX, Nikkei 225, KOSPI, FTSE, Hang Seng), Historic London Sovereign Papers (East India Co, Consols, South Sea Bubble), Multi-Asset Comparison Graphs, Arbitrary Date-Range Presets (1D to 300+ Years), G10 Forex Desk, Crypto Derivatives (Hyperliquid Arbitrage & Liquidation Heatmaps), Fantasy Futures Paper Trading Sandbox, EVM Honeypot Defense, Local Tax Accounting  
 **Control Port**: `14117`
 
 ---
 
 ## 1. What Is MoneyCraft?
 
-MoneyCraft is a sovereign, zero-subscription, local-first quantitative finance terminal and algorithmic research studio built in native Rust and immediate-mode GUI (`egui 0.37`). It provides individual quants, independent traders, and family offices with capabilities traditionally gatekept behind \$24,000–\$32,000/year institutional licenses (such as Bloomberg Terminal, Refinitiv Eikon, or FactSet) while strictly guaranteeing zero telemetry, zero data scraping, and local SQLite/DatabaseCraft privacy.
+MoneyCraft is a zero-subscription, local-first quantitative finance terminal and algorithmic research studio built in native Rust and immediate-mode GUI (`egui 0.37`). It provides individual quants, independent traders, and family offices with capabilities traditionally gatekept behind \$24,000–\$32,000/year institutional licenses (such as Bloomberg Terminal, Refinitiv Eikon, or FactSet) while strictly guaranteeing zero telemetry, zero data scraping, and local SQLite/DatabaseCraft privacy.
 
 ---
 
@@ -17,7 +17,7 @@ MoneyCraft is a sovereign, zero-subscription, local-first quantitative finance t
 
 | Feature / Dimension | Bloomberg Terminal | TradingView / SeekingAlpha | Coinglass / Hyperliquid | Claude / General Chatbots | **MoneyCraft v0.6.0** |
 |---|---|---|---|---|---|
-| **Annual License Cost** | \$24,000 – \$32,000 / year | \$200 – \$720 / year + upsells | Free / Paid VIP Tiers | \$240 / year (No finance kernel) | **100% Free & Sovereign Open Source** |
+| **Annual License Cost** | \$24,000 – \$32,000 / year | \$200 – \$720 / year + upsells | Free / Paid VIP Tiers | \$240 / year (No finance kernel) | **100% Free & Open Source** |
 | **Data Privacy & Scraping** | Corporate surveillance | Telemetry monetized | Cloud RPC / logs | Cloud conversation logs | **Zero Telemetry (Local DatabaseCraft B-Tree)** |
 | **Personal Wealth & Inflation** | None (institutional focus) | None (trading only) | None | Static approximations | **Real Purchasing Power Calculator (Giro, Festgeld, Bausparer vs Inflation)** |
 | **High-Density Charting** | Classic Amber/Obsidian | WebGL / Browser Canvas | WebGL | None (Text / Static ASCII) | **Native High-FPS Immediate-Mode egui (stochastic drift)** |
@@ -150,7 +150,7 @@ MoneyCraft is a sovereign, zero-subscription, local-first quantitative finance t
 - `FTSE`: FTSE 100 (United Kingdom)
 - `HSI`: Hang Seng Index (Hong Kong)
 
-### 💱 G10 Sovereign Forex Desk
+### 💱 G10 Forex Desk
 - `EUR/USD`: Euro / US Dollar
 - `USD/JPY`: US Dollar / Japanese Yen
 - `GBP/USD`: British Pound / US Dollar

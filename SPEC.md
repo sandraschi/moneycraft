@@ -8,7 +8,7 @@
 
 ## 1. Crate Architecture
 
-MoneyCraft follows the standard 4-tier sovereign Craft application layout:
+MoneyCraft follows the standard 4-tier local-first Craft application layout:
 
 ```
 moneycraft/

@@ -16,7 +16,7 @@ use tokio::runtime::Runtime;
 
 #[derive(Parser)]
 #[command(name = "moneycraft-cli")]
-#[command(about = "MoneyCraft: Sovereign Financial Intelligence & Algorithmic Trading CLI", version = APP_VERSION)]
+#[command(about = "MoneyCraft: Local-First Financial Intelligence & Algorithmic Trading CLI", version = APP_VERSION)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -52,7 +52,7 @@ enum Commands {
         #[arg(long, default_value_t = 10000.0)]
         capital: f64,
     },
-    /// Inspect private sovereign portfolio PnL and active positions
+    /// Inspect private local portfolio PnL and active positions
     Portfolio,
     /// List historical financial crises and systemic market panics (1720-2026)
     Panics,
@@ -249,7 +249,7 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
                                 "required": ["strategy"]
                             }
                         },
-                        { "name": "finance_portfolio", "description": "Inspect private sovereign portfolio PnL and active positions", "inputSchema": { "type": "object", "properties": {} } },
+                        { "name": "finance_portfolio", "description": "Inspect private local portfolio PnL and active positions", "inputSchema": { "type": "object", "properties": {} } },
                         { "name": "finance_historic_panics", "description": "List all 19 major historical financial crises and market panics from 1720 South Sea Bubble to modern day", "inputSchema": { "type": "object", "properties": {} } },
                         { "name": "finance_historic_instruments", "description": "List historical London Exchange Alley sovereign papers and equities (EIC, Consols, South Sea)", "inputSchema": { "type": "object", "properties": {} } },
                         {

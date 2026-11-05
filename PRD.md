@@ -1,6 +1,6 @@
 # MoneyCraft Product Requirements Document (PRD)
 
-**Title**: MoneyCraft Sovereign Financial Intelligence & Algorithmic Terminal  
+**Title**: MoneyCraft Local-First Financial Intelligence & Algorithmic Terminal  
 **Version**: 0.3.0  
 **Target Architecture**: Native Rust, egui 0.37, DatabaseCraft SQLite Engine  
 **Standard Control Port**: 14117  
@@ -11,7 +11,7 @@
 Commercial financial terminals (Bloomberg, Refinitiv) demand prohibitive annual fees (\$24,000–\$32,000/yr), whereas consumer platforms (TradingView, SeekingAlpha) aggressively monetize user telemetry and gate basic indicators behind subscription paywalls. Furthermore, decentralized finance is rife with predatory honeypot tokens and hidden fee traps.
 
 ## 2. Product Objectives
-- **Zero SaaS Cost**: 100% free, sovereign, and self-hosted on local hardware.
+- **Zero SaaS Cost**: 100% free, local-first, and self-hosted on local hardware.
 - **Zero Privacy Leakage**: All trade journals, portfolio holdings, and tax calculations remain local in DatabaseCraft.
 - **Bloomberg-Grade UX**: High-contrast obsidian canvas, amber ticker ribbons, continuous time-series curves, and snapping crosshair tooltips.
 - **Cross-Asset Scope**: Unified coverage across G10 Forex (EUR, USD, JPY, GBP, CNY), Crypto, Equities, and Precious Metals.
@@ -35,5 +35,5 @@ Commercial financial terminals (Bloomberg, Refinitiv) demand prohibitive annual 
    - Bytecode analysis flagging excessive transfer taxes, blacklists, and mint backdoors.
 6. **Algorithmic Backtester**:
    - Monte Carlo simulation computing Sharpe, Sortino, and Max Drawdown.
-7. **Sovereign Tax & Portfolio Ledger**:
+7. **Local Tax & Portfolio Ledger**:
    - Local FIFO/LIFO cost basis accounting.
