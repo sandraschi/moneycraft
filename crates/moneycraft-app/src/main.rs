@@ -491,7 +491,7 @@ impl eframe::App for MoneyCraftGui {
                         let is_index = summary["is_index"].as_bool().unwrap_or(false);
                         let pip_precision = summary["pip_precision"].as_u64().unwrap_or(2) as usize;
 
-                        ui.label(egui::RichText::new(&self.selected_symbol).strong().color(Color32::WHITE));
+                        ui.label(egui::RichText::new(&self.selected_symbol).strong().color(ui.visuals().strong_text_color()));
 
                         let fmt_price = if is_forex {
                             format!("{cur_price:.prec$}", prec = pip_precision)
