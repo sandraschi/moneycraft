@@ -94,6 +94,19 @@ cargo test --workspace
 ## Standard Port
 Assigned port: **14117** (registered in `mcp-central-docs/operations/WEBAPP_PORTS.md`).
 
+## Status — does today / next week / non-goals
+
+**Does today:** 4-crate Rust workspace (core/feed/mcp/app) + root
+PRD/SPEC/HELP; feed ingest + backtest verbs declared; historical
+deep-archive to 1720/1850 with panic annotations; 2 test fns.
+
+**Next week:** paper-only safety rule enforced in code + credential
+redaction; backtest fixture tests (known series → known numbers, no
+lookahead); first democraft recipe on fixtures.
+
+**Non-goals:** not financial advice; no live-money trading — paper-only by
+default, no exceptions.
+
 ## Lineage — the Storytold craft-app pattern
 
 Storytold ArtCraft ([storytold/artcraft](https://github.com/storytold/artcraft) — "the IDE for artists") was the starting point. The 16 craft apps in the Storytold stable each ship one binary that is both the human CLI and the agent MCP server (stdio), headless-first, with `run.json` + report artifacts. That modus operandi and harness is what this repo implements; the code here is independent, the pattern is shared.
