@@ -16,7 +16,9 @@
 
 use databasecraft_store::DatabaseStore;
 use eframe::egui::{self, Color32, Pos2, Rect, Stroke, Vec2};
-use moneycraft_core::{compute_personal_wealth_projection, dispatch, Command, PersonalWealthConfig, CONTROL_PORT};
+use moneycraft_core::{
+    compute_personal_wealth_projection, dispatch, Command, PersonalWealthConfig, CONTROL_PORT,
+};
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
@@ -76,7 +78,14 @@ pub struct MoneyCraftGui {
     pub wealth_report: Option<Value>,
 
     // Switchable Market Data Feed & Exchange Payola Options
+    // Default is Yahoo Finance (15-min delayed exchange data, free).
     pub active_data_source: String,
+
+    // Sidebar selectors: custom stock ticker + forex FROM/TO pair builder.
+    // Direction matters: FROM/TO defines the pair (EUR/USD != USD/EUR).
+    pub custom_ticker: String,
+    pub forex_from: String,
+    pub forex_to: String,
 
     // Bloomberg Charting Controls & Date Range
     pub chart_style: ChartStyle,
@@ -160,7 +169,10 @@ impl MoneyCraftGui {
             command_input: String::new(),
             wealth_config: default_wealth_cfg,
             wealth_report: None,
-            active_data_source: "synthetic".to_string(),
+            active_data_source: "yahoo".to_string(),
+            custom_ticker: String::new(),
+            forex_from: "EUR".to_string(),
+            forex_to: "USD".to_string(),
             chart_style: ChartStyle::Candlestick,
             date_preset: DateRangePreset::Month1,
             custom_bar_count: 60,
@@ -192,7 +204,7 @@ impl MoneyCraftGui {
             audit_report: None,
             backtest_result: None,
             portfolio_data: None,
-            status_message: "Bloomberg Sovereign Terminal Ready".to_string(),
+            status_message: "Yahoo Finance 15m-delayed feed ready (default) — pick indices, stocks, or any forex FROM/TO".to_string(),
             is_dark_theme: true,
             show_about_dialog: false,
             show_auth_modal: false,
@@ -215,15 +227,26 @@ impl MoneyCraftGui {
     pub fn run_wealth_simulation(&mut self) {
         let rep = compute_personal_wealth_projection(&self.wealth_config);
         self.wealth_report = Some(serde_json::to_value(&rep).unwrap_or(Value::Null));
-        self.status_message = "Personal wealth & inflation erosion simulation recalculated".to_string();
+        self.status_message =
+            "Personal wealth & inflation erosion simulation recalculated".to_string();
     }
 
     pub fn fetch_market_feed(&mut self) {
         let sym = self.selected_symbol.clone();
         let bars = self.custom_bar_count;
         let src = self.active_data_source.clone();
-        let res = self.runtime.block_on(dispatch(Command::GetMarketFeed { symbol: sym.clone(), bar_count: Some(bars), source: Some(src.clone()) }, &self.store));
-        let note = res["status_note"].as_str().unwrap_or("Feed updated").to_string();
+        let res = self.runtime.block_on(dispatch(
+            Command::GetMarketFeed {
+                symbol: sym.clone(),
+                bar_count: Some(bars),
+                source: Some(src.clone()),
+            },
+            &self.store,
+        ));
+        let note = res["status_note"]
+            .as_str()
+            .unwrap_or("Feed updated")
+            .to_string();
         self.market_data = Some(res);
         self.status_message = format!("[{src}] {note} for {sym} ({bars} bars)");
     }
@@ -232,7 +255,14 @@ impl MoneyCraftGui {
         let syms = self.comparison_symbols.clone();
         let bars = self.custom_bar_count;
         let src = self.active_data_source.clone();
-        let res = self.runtime.block_on(dispatch(Command::GetMultiSymbolFeed { symbols: syms, bar_count: Some(bars), source: Some(src) }, &self.store));
+        let res = self.runtime.block_on(dispatch(
+            Command::GetMultiSymbolFeed {
+                symbols: syms,
+                bar_count: Some(bars),
+                source: Some(src),
+            },
+            &self.store,
+        ));
         self.comparison_data = Some(res);
     }
 
@@ -256,17 +286,26 @@ impl MoneyCraftGui {
 
     pub fn fetch_derivatives(&mut self) {
         let sym = self.selected_symbol.clone();
-        let res = self.runtime.block_on(dispatch(Command::GetCryptoDerivativesFeed { symbol: sym.clone() }, &self.store));
+        let res = self.runtime.block_on(dispatch(
+            Command::GetCryptoDerivativesFeed {
+                symbol: sym.clone(),
+            },
+            &self.store,
+        ));
         self.derivatives_data = Some(res);
     }
 
     pub fn fetch_news_ticker(&mut self) {
-        let res = self.runtime.block_on(dispatch(Command::GetNewsTicker, &self.store));
+        let res = self
+            .runtime
+            .block_on(dispatch(Command::GetNewsTicker, &self.store));
         self.news_data = Some(res);
     }
 
     pub fn fetch_paper_account(&mut self) {
-        let res = self.runtime.block_on(dispatch(Command::PaperGetAccount, &self.store));
+        let res = self
+            .runtime
+            .block_on(dispatch(Command::PaperGetAccount, &self.store));
         self.paper_account = Some(res);
     }
 
@@ -287,19 +326,38 @@ impl MoneyCraftGui {
             },
             &self.store,
         ));
-        self.status_message = res["message"].as_str().unwrap_or("Fantasy position placed").to_string();
+        self.status_message = res["message"]
+            .as_str()
+            .unwrap_or("Fantasy position placed")
+            .to_string();
         self.fetch_paper_account();
     }
 
     pub fn close_paper_position(&mut self, pos_id: &str) {
-        let res = self.runtime.block_on(dispatch(Command::PaperClosePosition { position_id: pos_id.to_string() }, &self.store));
-        self.status_message = res["message"].as_str().unwrap_or("Position closed").to_string();
+        let res = self.runtime.block_on(dispatch(
+            Command::PaperClosePosition {
+                position_id: pos_id.to_string(),
+            },
+            &self.store,
+        ));
+        self.status_message = res["message"]
+            .as_str()
+            .unwrap_or("Position closed")
+            .to_string();
         self.fetch_paper_account();
     }
 
     pub fn reset_paper_account(&mut self) {
-        let res = self.runtime.block_on(dispatch(Command::PaperResetAccount { initial_balance: Some(100_000.0) }, &self.store));
-        self.status_message = res["message"].as_str().unwrap_or("Account reset").to_string();
+        let res = self.runtime.block_on(dispatch(
+            Command::PaperResetAccount {
+                initial_balance: Some(100_000.0),
+            },
+            &self.store,
+        ));
+        self.status_message = res["message"]
+            .as_str()
+            .unwrap_or("Account reset")
+            .to_string();
         self.fetch_paper_account();
     }
 
@@ -327,7 +385,13 @@ impl MoneyCraftGui {
     pub fn run_audit(&mut self) {
         let addr = self.audit_address.clone();
         let ch = self.audit_chain.clone();
-        let res = self.runtime.block_on(dispatch(Command::AuditContract { contract_address: addr, chain: ch }, &self.store));
+        let res = self.runtime.block_on(dispatch(
+            Command::AuditContract {
+                contract_address: addr,
+                chain: ch,
+            },
+            &self.store,
+        ));
         self.audit_report = Some(res);
         self.status_message = "Sandbox EVM smart-contract audit complete".to_string();
     }
@@ -336,13 +400,22 @@ impl MoneyCraftGui {
         let strat = self.strategy_name.clone();
         let sym = self.selected_symbol.clone();
         let cap = self.initial_capital;
-        let res = self.runtime.block_on(dispatch(Command::RunBacktest { strategy: strat, symbol: sym, initial_capital: cap }, &self.store));
+        let res = self.runtime.block_on(dispatch(
+            Command::RunBacktest {
+                strategy: strat,
+                symbol: sym,
+                initial_capital: cap,
+            },
+            &self.store,
+        ));
         self.backtest_result = Some(res);
         self.status_message = "10,000-path Monte Carlo backtest verified".to_string();
     }
 
     pub fn fetch_portfolio(&mut self) {
-        let res = self.runtime.block_on(dispatch(Command::PortfolioSummary, &self.store));
+        let res = self
+            .runtime
+            .block_on(dispatch(Command::PortfolioSummary, &self.store));
         self.portfolio_data = Some(res);
     }
 }
@@ -359,8 +432,8 @@ impl eframe::App for MoneyCraftGui {
         }
 
         let amber = Color32::from_rgb(255, 179, 0); // Classic Bloomberg Orange
-        let green = Color32::from_rgb(0, 230, 118);  // Jade Bull Green
-        let red = Color32::from_rgb(255, 23, 68);    // Crimson Bear Red
+        let green = Color32::from_rgb(0, 230, 118); // Jade Bull Green
+        let red = Color32::from_rgb(255, 23, 68); // Crimson Bear Red
 
         // 0. Desktop Menu Bar
         egui::Panel::top("desktop_menu_bar").show(ui, |ui| {
@@ -387,7 +460,10 @@ impl eframe::App for MoneyCraftGui {
                 });
 
                 ui.menu_button("Personal Wealth", |ui| {
-                    if ui.button("💶 Beginner Wealth & Inflation Simulator").clicked() {
+                    if ui
+                        .button("💶 Beginner Wealth & Inflation Simulator")
+                        .clicked()
+                    {
                         self.active_workspace = ActiveWorkspace::PersonalWealth;
                         ui.close();
                     }
@@ -398,8 +474,8 @@ impl eframe::App for MoneyCraftGui {
                 });
 
                 ui.menu_button("Global Indices", |ui| {
-                    for sym in &["DJIA", "SPX", "NDX", "DAX", "N225", "KOSPI", "FTSE", "HSI"] {
-                        if ui.button(*sym).clicked() {
+                    for (sym, name, _cat) in moneycraft_feed::MarketFeed::index_universe() {
+                        if ui.button(format!("{sym} — {name}")).clicked() {
                             self.selected_symbol = sym.to_string();
                             self.fetch_market_feed();
                             self.fetch_derivatives();
@@ -408,10 +484,26 @@ impl eframe::App for MoneyCraftGui {
                     }
                 });
 
+                ui.menu_button("Stocks", |ui| {
+                    for (ticker, name, _cat) in moneycraft_feed::MarketFeed::stock_universe() {
+                        if ui.button(format!("{ticker} — {name}")).clicked() {
+                            self.selected_symbol = ticker.to_string();
+                            self.fetch_market_feed();
+                            self.fetch_derivatives();
+                            ui.close();
+                        }
+                    }
+                });
+
                 ui.menu_button("Forex Desk", |ui| {
-                    for sym in &["EUR/USD", "USD/JPY", "GBP/USD", "USD/CNY", "EUR/GBP"] {
-                        if ui.button(*sym).clicked() {
+                    for sym in moneycraft_feed::MarketFeed::popular_forex_pairs() {
+                        if ui.button(sym).clicked() {
                             self.selected_symbol = sym.to_string();
+                            let parts: Vec<&str> = sym.split('/').collect();
+                            if parts.len() == 2 {
+                                self.forex_from = parts[0].to_string();
+                                self.forex_to = parts[1].to_string();
+                            }
                             self.fetch_market_feed();
                             self.fetch_derivatives();
                             ui.close();
@@ -461,7 +553,11 @@ impl eframe::App for MoneyCraftGui {
                 });
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let (icon, label) = if self.is_dark_theme { ("☀", "Light") } else { ("🌙", "Dark") };
+                    let (icon, label) = if self.is_dark_theme {
+                        ("☀", "Light")
+                    } else {
+                        ("🌙", "Dark")
+                    };
                     if ui.small_button(format!("{icon} {label}")).clicked() {
                         self.is_dark_theme = !self.is_dark_theme;
                     }
@@ -478,7 +574,12 @@ impl eframe::App for MoneyCraftGui {
         // 1. Bloomberg Top Ticker Bar
         egui::Panel::top("finance_top_bar").show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.strong(egui::RichText::new("BLOOMBERG // MONEYCRAFT SOVEREIGN TERMINAL").color(amber).monospace().size(15.0));
+                ui.strong(
+                    egui::RichText::new("BLOOMBERG // MONEYCRAFT SOVEREIGN TERMINAL")
+                        .color(amber)
+                        .monospace()
+                        .size(15.0),
+                );
                 ui.separator();
 
                 // Live Summary Ticker
@@ -491,7 +592,11 @@ impl eframe::App for MoneyCraftGui {
                         let is_index = summary["is_index"].as_bool().unwrap_or(false);
                         let pip_precision = summary["pip_precision"].as_u64().unwrap_or(2) as usize;
 
-                        ui.label(egui::RichText::new(&self.selected_symbol).strong().color(ui.visuals().strong_text_color()));
+                        ui.label(
+                            egui::RichText::new(&self.selected_symbol)
+                                .strong()
+                                .color(ui.visuals().strong_text_color()),
+                        );
 
                         let fmt_price = if is_forex {
                             format!("{cur_price:.prec$}", prec = pip_precision)
@@ -501,7 +606,12 @@ impl eframe::App for MoneyCraftGui {
                             format!("${cur_price:.2}")
                         };
 
-                        ui.label(egui::RichText::new(fmt_price).monospace().size(15.0).color(if change_pct >= 0.0 { green } else { red }));
+                        ui.label(
+                            egui::RichText::new(fmt_price)
+                                .monospace()
+                                .size(15.0)
+                                .color(if change_pct >= 0.0 { green } else { red }),
+                        );
 
                         let sign = if change_pct >= 0.0 { "+" } else { "" };
                         let change_txt = format!("{sign}{change_usd:+.2} ({sign}{change_pct:.2}%)");
@@ -510,7 +620,11 @@ impl eframe::App for MoneyCraftGui {
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(egui::RichText::new(format!("PORT: {CONTROL_PORT}")).monospace().color(amber));
+                    ui.label(
+                        egui::RichText::new(format!("PORT: {CONTROL_PORT}"))
+                            .monospace()
+                            .color(amber),
+                    );
                     ui.separator();
 
                     // Fleet Standard i18n Language Switcher
@@ -531,7 +645,12 @@ impl eframe::App for MoneyCraftGui {
         // 2. Real-Time Bloomberg Breaking News Ticker Bar
         egui::Panel::top("breaking_news_ticker").show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("⚡ NEWS WIRE:").color(amber).monospace().strong());
+                ui.label(
+                    egui::RichText::new("⚡ NEWS WIRE:")
+                        .color(amber)
+                        .monospace()
+                        .strong(),
+                );
                 if let Some(ref nd) = self.news_data {
                     if let Some(headlines) = nd["headlines"].as_array() {
                         if !headlines.is_empty() {
@@ -548,9 +667,18 @@ impl eframe::App for MoneyCraftGui {
                             };
 
                             ui.label(egui::RichText::new(format!("[{time}]")).weak().monospace());
-                            ui.label(egui::RichText::new(format!("[{cat}]")).color(amber).monospace());
+                            ui.label(
+                                egui::RichText::new(format!("[{cat}]"))
+                                    .color(amber)
+                                    .monospace(),
+                            );
                             ui.label(egui::RichText::new(txt).color(Color32::WHITE).strong());
-                            ui.label(egui::RichText::new(format!("• {sentiment}")).color(s_color).monospace().strong());
+                            ui.label(
+                                egui::RichText::new(format!("• {sentiment}"))
+                                    .color(s_color)
+                                    .monospace()
+                                    .strong(),
+                            );
 
                             if ui.button("▶ Next Wire").clicked() {
                                 self.news_index = (self.news_index + 1) % headlines.len();
@@ -568,7 +696,11 @@ impl eframe::App for MoneyCraftGui {
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(&self.status_message).weak().monospace());
                 ui.separator();
-                ui.label(egui::RichText::new("QUANT KERNEL: ACTIVE").color(green).monospace());
+                ui.label(
+                    egui::RichText::new("QUANT KERNEL: ACTIVE")
+                        .color(green)
+                        .monospace(),
+                );
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("GO <ENTER>").clicked() {
@@ -581,130 +713,222 @@ impl eframe::App for MoneyCraftGui {
                         }
                     }
                     ui.text_edit_singleline(&mut self.command_input);
-                    ui.label(egui::RichText::new("TERMINAL CMD:").color(amber).monospace());
+                    ui.label(
+                        egui::RichText::new("TERMINAL CMD:")
+                            .color(amber)
+                            .monospace(),
+                    );
                 });
             });
         });
 
-        // 4. Navigation Rail
-        egui::Panel::left("finance_nav_rail").min_size(220.0).show(ui, |ui| {
+        // 4. Navigation Rail — every section collapsible + scrollable so the
+        // rail never becomes a hundred vertical steps.
+        egui::Panel::left("finance_nav_rail").min_size(230.0).show(ui, |ui| {
+            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             ui.add_space(8.0);
-            ui.strong(egui::RichText::new("TERMINAL FUNCTIONS").color(amber));
-            ui.add_space(4.0);
+            egui::CollapsingHeader::new("TERMINAL FUNCTIONS")
+                .default_open(true)
+                .show(ui, |ui| {
+                let nav_btn = |ui: &mut egui::Ui, active: bool, text: &str| -> bool {
+                    let rich = egui::RichText::new(text).color(if active { amber } else { Color32::WHITE });
+                    ui.selectable_label(active, rich).clicked()
+                };
 
-            let nav_btn = |ui: &mut egui::Ui, active: bool, text: &str| -> bool {
-                let rich = egui::RichText::new(text).color(if active { amber } else { Color32::WHITE });
-                ui.selectable_label(active, rich).clicked()
-            };
+                let loc = self.locale;
+                use moneycraft_core::i18n::{t, I18nKey};
 
-            let loc = self.locale;
-            use moneycraft_core::i18n::{t, I18nKey};
-
-            if nav_btn(ui, self.active_workspace == ActiveWorkspace::PersonalWealth, t(I18nKey::NavPersonalWealth, loc)) {
-                self.active_workspace = ActiveWorkspace::PersonalWealth;
-                self.run_wealth_simulation();
-            }
-            if nav_btn(ui, self.active_workspace == ActiveWorkspace::Terminal, t(I18nKey::NavTerminal, loc)) {
-                self.active_workspace = ActiveWorkspace::Terminal;
-                self.fetch_market_feed();
-            }
-            if nav_btn(ui, self.active_workspace == ActiveWorkspace::DataSources, t(I18nKey::NavDataSources, loc)) {
-                self.active_workspace = ActiveWorkspace::DataSources;
-            }
-            if nav_btn(ui, self.active_workspace == ActiveWorkspace::MultiComparison, t(I18nKey::NavMultiCompare, loc)) {
-                self.active_workspace = ActiveWorkspace::MultiComparison;
-                self.fetch_multi_comparison();
-            }
-            if nav_btn(ui, self.active_workspace == ActiveWorkspace::CryptoDerivatives, t(I18nKey::NavCryptoDerivatives, loc)) {
-                self.active_workspace = ActiveWorkspace::CryptoDerivatives;
-                self.fetch_derivatives();
-            }
-            if nav_btn(ui, self.active_workspace == ActiveWorkspace::FantasyTrading, t(I18nKey::NavFantasyTrading, loc)) {
-                self.active_workspace = ActiveWorkspace::FantasyTrading;
-                self.fetch_paper_account();
-            }
-            if nav_btn(ui, self.active_workspace == ActiveWorkspace::AiWorkflows, t(I18nKey::NavAiWorkflows, loc)) {
-                self.active_workspace = ActiveWorkspace::AiWorkflows;
-            }
-            if nav_btn(ui, self.active_workspace == ActiveWorkspace::HoneypotAuditor, t(I18nKey::NavHoneypotAuditor, loc)) {
-                self.active_workspace = ActiveWorkspace::HoneypotAuditor;
-            }
-            if nav_btn(ui, self.active_workspace == ActiveWorkspace::Backtester, t(I18nKey::NavBacktester, loc)) {
-                self.active_workspace = ActiveWorkspace::Backtester;
-            }
-            if nav_btn(ui, self.active_workspace == ActiveWorkspace::PortfolioLedger, t(I18nKey::NavPortfolioLedger, loc)) {
-                self.active_workspace = ActiveWorkspace::PortfolioLedger;
-                self.fetch_portfolio();
-            }
-
-            ui.add_space(8.0);
-            ui.separator();
-            ui.strong(egui::RichText::new("GLOBAL INDICES").color(amber));
-            for sym in &["DJIA", "SPX", "NDX", "DAX", "N225", "KOSPI", "FTSE", "HSI"] {
-                let is_sel = self.selected_symbol == *sym;
-                if ui.selectable_label(is_sel, *sym).clicked() {
-                    self.selected_symbol = sym.to_string();
+                if nav_btn(ui, self.active_workspace == ActiveWorkspace::PersonalWealth, t(I18nKey::NavPersonalWealth, loc)) {
+                    self.active_workspace = ActiveWorkspace::PersonalWealth;
+                    self.run_wealth_simulation();
+                }
+                if nav_btn(ui, self.active_workspace == ActiveWorkspace::Terminal, t(I18nKey::NavTerminal, loc)) {
+                    self.active_workspace = ActiveWorkspace::Terminal;
                     self.fetch_market_feed();
+                }
+                if nav_btn(ui, self.active_workspace == ActiveWorkspace::DataSources, t(I18nKey::NavDataSources, loc)) {
+                    self.active_workspace = ActiveWorkspace::DataSources;
+                }
+                if nav_btn(ui, self.active_workspace == ActiveWorkspace::MultiComparison, t(I18nKey::NavMultiCompare, loc)) {
+                    self.active_workspace = ActiveWorkspace::MultiComparison;
+                    self.fetch_multi_comparison();
+                }
+                if nav_btn(ui, self.active_workspace == ActiveWorkspace::CryptoDerivatives, t(I18nKey::NavCryptoDerivatives, loc)) {
+                    self.active_workspace = ActiveWorkspace::CryptoDerivatives;
                     self.fetch_derivatives();
                 }
-            }
-
-            ui.add_space(8.0);
-            ui.separator();
-            ui.strong(egui::RichText::new("FOREX DESK").color(amber));
-            for sym in &["EUR/USD", "USD/JPY", "GBP/USD", "USD/CNY", "EUR/GBP"] {
-                let is_sel = self.selected_symbol == *sym;
-                if ui.selectable_label(is_sel, *sym).clicked() {
-                    self.selected_symbol = sym.to_string();
-                    self.fetch_market_feed();
-                    self.fetch_derivatives();
+                if nav_btn(ui, self.active_workspace == ActiveWorkspace::FantasyTrading, t(I18nKey::NavFantasyTrading, loc)) {
+                    self.active_workspace = ActiveWorkspace::FantasyTrading;
+                    self.fetch_paper_account();
                 }
-            }
-
-            ui.add_space(8.0);
-            ui.separator();
-            ui.strong(egui::RichText::new("📜 HISTORIC PAPERS (LONDON)").color(amber));
-            for (sym, desc) in &[
-                ("EIC", "Honourable East India Co. (1600-1874)"),
-                ("UK_CONSOLS", "Bank of England 3% Consols (1751+)"),
-                ("SOUTH_SEA", "South Sea Company (1711-1720)"),
-            ] {
-                let is_sel = self.selected_symbol == *sym;
-                if ui.selectable_label(is_sel, format!("{sym} - {desc}")).clicked() {
-                    self.selected_symbol = sym.to_string();
-                    self.date_preset = DateRangePreset::Historic1850;
-                    self.set_date_preset(DateRangePreset::Historic1850);
-                    self.show_historic_panics = true;
+                if nav_btn(ui, self.active_workspace == ActiveWorkspace::AiWorkflows, t(I18nKey::NavAiWorkflows, loc)) {
+                    self.active_workspace = ActiveWorkspace::AiWorkflows;
                 }
-            }
+                if nav_btn(ui, self.active_workspace == ActiveWorkspace::HoneypotAuditor, t(I18nKey::NavHoneypotAuditor, loc)) {
+                    self.active_workspace = ActiveWorkspace::HoneypotAuditor;
+                }
+                if nav_btn(ui, self.active_workspace == ActiveWorkspace::Backtester, t(I18nKey::NavBacktester, loc)) {
+                    self.active_workspace = ActiveWorkspace::Backtester;
+                }
+                if nav_btn(ui, self.active_workspace == ActiveWorkspace::PortfolioLedger, t(I18nKey::NavPortfolioLedger, loc)) {
+                    self.active_workspace = ActiveWorkspace::PortfolioLedger;
+                    self.fetch_portfolio();
+                }
+            });
 
-            ui.add_space(8.0);
-            ui.separator();
-            ui.strong(egui::RichText::new("🚩 HISTORIC PANICS").color(red));
-            for (year, name) in &[
-                (1720, "1720: South Sea Bubble"),
-                (1825, "1825: Latin American / Poyais"),
-                (1847, "1847: Railway Mania"),
-                (1857, "1857: Telegraph Panic"),
-                (1866, "1866: Overend Gurney"),
-                (1873, "1873: Gründerkrach"),
-                (1929, "1929: Wall Street Crash"),
-                (1987, "1987: Black Monday"),
-                (2008, "2008: Global Financial Crisis"),
-                (2020, "2020: Covid Liquidity Shock"),
-            ] {
-                if ui.button(format!("{name}")).clicked() {
-                    self.show_historic_panics = true;
-                    if *year < 1850 {
-                        self.set_date_preset(DateRangePreset::AllTime1720);
-                    } else if *year < 1990 {
-                        self.set_date_preset(DateRangePreset::Historic1850);
-                    } else {
-                        self.set_date_preset(DateRangePreset::Max1990);
+            egui::CollapsingHeader::new("GLOBAL INDICES — Yahoo 15m delayed")
+                .default_open(true)
+                .show(ui, |ui| {
+                for (sym, name, _cat) in moneycraft_feed::MarketFeed::index_universe() {
+                    let is_sel = self.selected_symbol == sym;
+                    if ui.selectable_label(is_sel, format!("{sym}  ·  {name}")).clicked() {
+                        self.selected_symbol = sym.to_string();
+                        self.fetch_market_feed();
+                        self.fetch_derivatives();
                     }
-                    self.status_message = format!("Inspecting Crisis Year {year}: {name}");
                 }
-            }
+            });
+
+            egui::CollapsingHeader::new("STOCKS — Yahoo 15m delayed")
+                .default_open(true)
+                .show(ui, |ui| {
+                for (ticker, name, _cat) in moneycraft_feed::MarketFeed::stock_universe() {
+                    let is_sel = self.selected_symbol == ticker;
+                    if ui.selectable_label(is_sel, format!("{ticker}  ·  {name}")).clicked() {
+                        self.selected_symbol = ticker.to_string();
+                        self.fetch_market_feed();
+                        self.fetch_derivatives();
+                    }
+                }
+                ui.separator();
+                ui.label(egui::RichText::new("Any Yahoo ticker:").small());
+                ui.horizontal(|ui| {
+                    ui.text_edit_singleline(&mut self.custom_ticker);
+                    if ui.button("Load").clicked() {
+                        let t = self.custom_ticker.trim().to_uppercase().replace(' ', "");
+                        if !t.is_empty() {
+                            self.selected_symbol = t.clone();
+                            self.fetch_market_feed();
+                            self.fetch_derivatives();
+                        }
+                    }
+                });
+                ui.label(egui::RichText::new("e.g. AAPL, MSFT, SAP.DE, ASML").small().weak());
+            });
+
+            egui::CollapsingHeader::new("FOREX DESK — FROM/TO + 20 majors")
+                .default_open(true)
+                .show(ui, |ui| {
+                ui.label(egui::RichText::new("Direction matters: EUR/USD != USD/EUR. Yahoo 15m, ECB daily.").small().weak());
+                let majors = moneycraft_feed::MarketFeed::major_currencies();
+                let mut from = self.forex_from.clone();
+                let mut to = self.forex_to.clone();
+                ui.horizontal(|ui| {
+                    ui.label("FROM:");
+                    egui::ComboBox::from_id_salt("forex_from_combo")
+                        .selected_text(from.clone())
+                        .show_ui(ui, |ui| {
+                            for (code, name) in &majors {
+                                let _ = ui.selectable_value(&mut from, code.to_string(), format!("{code} — {name}"));
+                            }
+                        });
+                    if ui.button("⇄ Swap").clicked() {
+                        std::mem::swap(&mut from, &mut to);
+                    }
+                    ui.label("TO:");
+                    egui::ComboBox::from_id_salt("forex_to_combo")
+                        .selected_text(to.clone())
+                        .show_ui(ui, |ui| {
+                            for (code, name) in &majors {
+                                let _ = ui.selectable_value(&mut to, code.to_string(), format!("{code} — {name}"));
+                            }
+                        });
+                });
+                let pair = format!("{from}/{to}");
+                let pair_invalid = from == to;
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(&pair).monospace().strong());
+                    let load_btn = ui.add_enabled(!pair_invalid, egui::Button::new("Load pair"));
+                    if load_btn.clicked() {
+                        self.forex_from = from.clone();
+                        self.forex_to = to.clone();
+                        self.selected_symbol = pair.clone();
+                        self.fetch_market_feed();
+                        self.fetch_derivatives();
+                    }
+                });
+                if pair_invalid {
+                    ui.colored_label(red, "FROM and TO must differ — pick a direction.");
+                } else {
+                    // Keep selectors in sync even without Load (for menu parity).
+                    self.forex_from = from.clone();
+                    self.forex_to = to.clone();
+                }
+                ui.separator();
+                ui.label(egui::RichText::new("Quick pairs:").small());
+                for sym in moneycraft_feed::MarketFeed::popular_forex_pairs() {
+                    let is_sel = self.selected_symbol == sym;
+                    if ui.selectable_label(is_sel, sym).clicked() {
+                        self.selected_symbol = sym.to_string();
+                        // Reflect quick pick back into FROM/TO selectors.
+                        let parts: Vec<&str> = sym.split('/').collect();
+                        if parts.len() == 2 {
+                            self.forex_from = parts[0].to_string();
+                            self.forex_to = parts[1].to_string();
+                        }
+                        self.fetch_market_feed();
+                        self.fetch_derivatives();
+                    }
+                }
+            });
+
+            egui::CollapsingHeader::new("📜 HISTORIC PAPERS (LONDON)")
+                .default_open(false)
+                .show(ui, |ui| {
+                for (sym, desc) in &[
+                    ("EIC", "Honourable East India Co. (1600-1874)"),
+                    ("UK_CONSOLS", "Bank of England 3% Consols (1751+)"),
+                    ("SOUTH_SEA", "South Sea Company (1711-1720)"),
+                ] {
+                    let is_sel = self.selected_symbol == *sym;
+                    if ui.selectable_label(is_sel, format!("{sym} - {desc}")).clicked() {
+                        self.selected_symbol = sym.to_string();
+                        self.date_preset = DateRangePreset::Historic1850;
+                        self.set_date_preset(DateRangePreset::Historic1850);
+                        self.show_historic_panics = true;
+                    }
+                }
+            });
+
+            egui::CollapsingHeader::new("🚩 HISTORIC PANICS")
+                .default_open(false)
+                .show(ui, |ui| {
+                for (year, name) in &[
+                    (1720, "1720: South Sea Bubble"),
+                    (1825, "1825: Latin American / Poyais"),
+                    (1847, "1847: Railway Mania"),
+                    (1857, "1857: Telegraph Panic"),
+                    (1866, "1866: Overend Gurney"),
+                    (1873, "1873: Gründerkrach"),
+                    (1929, "1929: Wall Street Crash"),
+                    (1987, "1987: Black Monday"),
+                    (2008, "2008: Global Financial Crisis"),
+                    (2020, "2020: Covid Liquidity Shock"),
+                ] {
+                    if ui.button(name.to_string()).clicked() {
+                        self.show_historic_panics = true;
+                        if *year < 1850 {
+                            self.set_date_preset(DateRangePreset::AllTime1720);
+                        } else if *year < 1990 {
+                            self.set_date_preset(DateRangePreset::Historic1850);
+                        } else {
+                            self.set_date_preset(DateRangePreset::Max1990);
+                        }
+                        self.status_message = format!("Inspecting Crisis Year {year}: {name}");
+                    }
+                }
+            });
+            });
         });
 
         // 5. Central Panel
@@ -756,15 +980,17 @@ impl eframe::App for MoneyCraftGui {
                 .collapsible(false)
                 .resizable(false)
                 .show(ui.ctx(), |ui| {
-                    ui.heading("MoneyCraft Sovereign Terminal v0.6.0");
+                    ui.heading("MoneyCraft Sovereign Terminal v0.7.0");
                     ui.label("Personal wealth & savings simulator (Girokonto, Festgeld 3%, Bausparer, Inflation run-rate erosion),");
                     ui.label("Bloomberg-grade financial analysis, high-density time-series charting,");
-                    ui.label("Global Indices desk (Dow Jones, S&P 500, Nasdaq, DAX, Nikkei 225, KOSPI, FTSE, Hang Seng),");
+                    ui.label("Global Indices desk (10: DJIA, SPX, NDX, DAX, N225, KOSPI, FTSE, HSI, STOXX50, CAC40) — Yahoo 15m delayed,");
+                    ui.label("Stocks desk (15 quick picks AAPL..ASML + any Yahoo ticker via custom input) — Yahoo 15m delayed,");
+                    ui.label("Forex desk: any FROM/TO cross of 20 majors (direction matters) — Yahoo 15m, ECB daily 14:15 CET,");
                     ui.label("Multi-asset normalized comparison graph & arbitrary date-range presets (1D, 1W, 1M, 3M, YTD, 1Y),");
                     ui.label("Hyperliquid funding arbitrage & forward-looking liquidation heatmap,");
                     ui.label("Fantasy paper trading futures desk (1x-50x leverage sandbox),");
-                    ui.label("G10 Forex desk (EUR, USD, JPY, GBP, CNY), breaking news ticker,");
-                    ui.label("agentic AI quantitative workflows, EVM honeypot auditor, and sovereign tax ledger.");
+                    ui.label("breaking news ticker, agentic AI quantitative workflows, EVM honeypot auditor, and sovereign tax ledger.");
+                    ui.label("Delayed data only (15m / daily). Not investment advice; paper-trade sandbox, no live orders.");
                     ui.separator();
                     if ui.button("Close").clicked() {
                         self.show_about_dialog = false;
@@ -781,7 +1007,10 @@ impl MoneyCraftGui {
         let red = Color32::from_rgb(255, 23, 68);
         let cyan = Color32::from_rgb(0, 229, 255);
 
-        ui.heading(egui::RichText::new("💶 PERSONAL WEALTH, SAVINGS & INFLATION EROSION SIMULATOR").color(amber));
+        ui.heading(
+            egui::RichText::new("💶 PERSONAL WEALTH, SAVINGS & INFLATION EROSION SIMULATOR")
+                .color(amber),
+        );
         ui.label("Money for beginners: Visualize how inflation silently eats cash across checking accounts, fixed deposits, and Bausparer:");
 
         ui.add_space(8.0);
@@ -795,19 +1024,43 @@ impl MoneyCraftGui {
                 cols[0].label(egui::RichText::new("1. Monthly Cashflow").strong());
                 cols[0].horizontal(|ui| {
                     ui.label("Monthly Income (In):");
-                    if ui.add(egui::DragValue::new(&mut self.wealth_config.monthly_income_eur).range(500.0..=20000.0).speed(50.0).suffix(" €")).changed() {
+                    if ui
+                        .add(
+                            egui::DragValue::new(&mut self.wealth_config.monthly_income_eur)
+                                .range(500.0..=20000.0)
+                                .speed(50.0)
+                                .suffix(" €"),
+                        )
+                        .changed()
+                    {
                         recompute = true;
                     }
                 });
                 cols[0].horizontal(|ui| {
                     ui.label("Living Expenses (Out):");
-                    if ui.add(egui::DragValue::new(&mut self.wealth_config.monthly_living_costs_eur).range(200.0..=15000.0).speed(50.0).suffix(" €")).changed() {
+                    if ui
+                        .add(
+                            egui::DragValue::new(&mut self.wealth_config.monthly_living_costs_eur)
+                                .range(200.0..=15000.0)
+                                .speed(50.0)
+                                .suffix(" €"),
+                        )
+                        .changed()
+                    {
                         recompute = true;
                     }
                 });
                 cols[0].horizontal(|ui| {
                     ui.label("Checking (Girokonto):");
-                    if ui.add(egui::DragValue::new(&mut self.wealth_config.checking_balance_eur).range(0.0..=50000.0).speed(100.0).suffix(" €")).changed() {
+                    if ui
+                        .add(
+                            egui::DragValue::new(&mut self.wealth_config.checking_balance_eur)
+                                .range(0.0..=50000.0)
+                                .speed(100.0)
+                                .suffix(" €"),
+                        )
+                        .changed()
+                    {
                         recompute = true;
                     }
                 });
@@ -816,29 +1069,73 @@ impl MoneyCraftGui {
                 cols[1].label(egui::RichText::new("2. Savings Products").strong());
                 cols[1].horizontal(|ui| {
                     ui.label("Festgeld (Bound):");
-                    if ui.add(egui::DragValue::new(&mut self.wealth_config.festgeld_principal_eur).range(0.0..=200000.0).speed(500.0).suffix(" €")).changed() {
+                    if ui
+                        .add(
+                            egui::DragValue::new(&mut self.wealth_config.festgeld_principal_eur)
+                                .range(0.0..=200000.0)
+                                .speed(500.0)
+                                .suffix(" €"),
+                        )
+                        .changed()
+                    {
                         recompute = true;
                     }
                 });
                 cols[1].horizontal(|ui| {
                     ui.label("Festgeld Rate / Term:");
-                    if ui.add(egui::DragValue::new(&mut self.wealth_config.festgeld_interest_rate_pct).range(0.1..=8.0).speed(0.1).suffix(" %")).changed() {
+                    if ui
+                        .add(
+                            egui::DragValue::new(
+                                &mut self.wealth_config.festgeld_interest_rate_pct,
+                            )
+                            .range(0.1..=8.0)
+                            .speed(0.1)
+                            .suffix(" %"),
+                        )
+                        .changed()
+                    {
                         recompute = true;
                     }
                     ui.label("for");
-                    if ui.add(egui::DragValue::new(&mut self.wealth_config.festgeld_term_years).range(1.0..=10.0).speed(1.0).suffix(" yrs")).changed() {
+                    if ui
+                        .add(
+                            egui::DragValue::new(&mut self.wealth_config.festgeld_term_years)
+                                .range(1.0..=10.0)
+                                .speed(1.0)
+                                .suffix(" yrs"),
+                        )
+                        .changed()
+                    {
                         recompute = true;
                     }
                 });
                 cols[1].horizontal(|ui| {
                     ui.label("Bausparer Deposit/mo:");
-                    if ui.add(egui::DragValue::new(&mut self.wealth_config.bausparer_monthly_deposit_eur).range(0.0..=500.0).speed(10.0).suffix(" €")).changed() {
+                    if ui
+                        .add(
+                            egui::DragValue::new(
+                                &mut self.wealth_config.bausparer_monthly_deposit_eur,
+                            )
+                            .range(0.0..=500.0)
+                            .speed(10.0)
+                            .suffix(" €"),
+                        )
+                        .changed()
+                    {
                         recompute = true;
                     }
                 });
                 cols[1].horizontal(|ui| {
                     ui.label("Bausparer Balance:");
-                    if ui.add(egui::DragValue::new(&mut self.wealth_config.bausparer_balance_eur).range(0.0..=100000.0).speed(250.0).suffix(" €")).changed() {
+                    if ui
+                        .add(
+                            egui::DragValue::new(&mut self.wealth_config.bausparer_balance_eur)
+                                .range(0.0..=100000.0)
+                                .speed(250.0)
+                                .suffix(" €"),
+                        )
+                        .changed()
+                    {
                         recompute = true;
                     }
                 });
@@ -847,13 +1144,27 @@ impl MoneyCraftGui {
                 cols[2].label(egui::RichText::new("3. Macro Inflation Drag").strong());
                 cols[2].horizontal(|ui| {
                     ui.label("Inflation Run Rate:");
-                    if ui.add(egui::DragValue::new(&mut self.wealth_config.inflation_run_rate_pct).range(0.5..=15.0).speed(0.1).suffix(" %")).changed() {
+                    if ui
+                        .add(
+                            egui::DragValue::new(&mut self.wealth_config.inflation_run_rate_pct)
+                                .range(0.5..=15.0)
+                                .speed(0.1)
+                                .suffix(" %"),
+                        )
+                        .changed()
+                    {
                         recompute = true;
                     }
                 });
                 cols[2].horizontal(|ui| {
                     ui.label("Simulate Forward:");
-                    if ui.add(egui::Slider::new(&mut self.wealth_config.simulation_years, 1..=10).text("Years")).changed() {
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut self.wealth_config.simulation_years, 1..=10)
+                                .text("Years"),
+                        )
+                        .changed()
+                    {
                         recompute = true;
                     }
                 });
@@ -868,21 +1179,33 @@ impl MoneyCraftGui {
         if let Some(ref rep_val) = self.wealth_report {
             let total_liq = rep_val["current_total_liquid_eur"].as_f64().unwrap_or(0.0);
             let free_cf = rep_val["monthly_free_cashflow_eur"].as_f64().unwrap_or(0.0);
-            let annual_interest = rep_val["annual_nominal_interest_eur"].as_f64().unwrap_or(0.0);
-            let annual_inflation_drag = rep_val["annual_inflation_drag_eur"].as_f64().unwrap_or(0.0);
+            let annual_interest = rep_val["annual_nominal_interest_eur"]
+                .as_f64()
+                .unwrap_or(0.0);
+            let annual_inflation_drag =
+                rep_val["annual_inflation_drag_eur"].as_f64().unwrap_or(0.0);
             let net_real_yield = rep_val["net_real_yield_pct"].as_f64().unwrap_or(0.0);
-            let halve_years = rep_val["years_to_halve_purchasing_power"].as_f64().unwrap_or(0.0);
+            let halve_years = rep_val["years_to_halve_purchasing_power"]
+                .as_f64()
+                .unwrap_or(0.0);
 
             // 2. Big Numbers Diagnostic HUD
             egui::Frame::group(ui.style()).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(format!("CURRENT SAVINGS: {total_liq:.0} €")).size(15.0).strong());
+                    ui.label(
+                        egui::RichText::new(format!("CURRENT SAVINGS: {total_liq:.0} €"))
+                            .size(15.0)
+                            .strong(),
+                    );
                     ui.separator();
                     ui.colored_label(green, format!("MONTHLY SAVINGS FLOW: +{free_cf:.0} €/mo"));
                     ui.separator();
                     ui.label(format!("INTEREST EARNED: +{annual_interest:.0} €/yr"));
                     ui.separator();
-                    ui.colored_label(red, format!("INFLATION EROSION: -{annual_inflation_drag:.0} €/yr"));
+                    ui.colored_label(
+                        red,
+                        format!("INFLATION EROSION: -{annual_inflation_drag:.0} €/yr"),
+                    );
                     ui.separator();
 
                     let net_color = if net_real_yield >= 0.0 { green } else { red };
@@ -902,48 +1225,60 @@ impl MoneyCraftGui {
 
             ui.add_space(10.0);
             // 4. Nominal vs Real Wealth Projections Table
-            ui.strong(egui::RichText::new("NOMINAL ILLUSION VS. REAL PURCHASING POWER (YEAR-BY-YEAR)").color(amber));
+            ui.strong(
+                egui::RichText::new("NOMINAL ILLUSION VS. REAL PURCHASING POWER (YEAR-BY-YEAR)")
+                    .color(amber),
+            );
             if let Some(proj) = rep_val["projections"].as_array() {
-                egui::Grid::new("wealth_proj_grid").striped(true).min_col_width(95.0).show(ui, |ui| {
-                    ui.strong("Year");
-                    ui.strong("Checking");
-                    ui.strong("Festgeld");
-                    ui.strong("Bausparer");
-                    ui.strong("Nominal Total (Bank App)");
-                    ui.strong("Real Value (True Goods)");
-                    ui.strong("Silent Inflation Loss");
-                    ui.strong("Value Kept");
-                    ui.strong("Real Monthly Income");
-                    ui.end_row();
-
-                    for p in proj {
-                        let y = p["year"].as_u64().unwrap_or(0);
-                        let chk = p["checking_eur"].as_f64().unwrap_or(0.0);
-                        let fest = p["festgeld_nominal_eur"].as_f64().unwrap_or(0.0);
-                        let bau = p["bausparer_nominal_eur"].as_f64().unwrap_or(0.0);
-                        let nom = p["total_nominal_wealth_eur"].as_f64().unwrap_or(0.0);
-                        let real = p["total_real_wealth_eur"].as_f64().unwrap_or(0.0);
-                        let loss = p["cumulative_inflation_loss_eur"].as_f64().unwrap_or(0.0);
-                        let ret = p["purchasing_power_retention_pct"].as_f64().unwrap_or(0.0);
-                        let m_real = p["monthly_purchasing_power_eur"].as_f64().unwrap_or(0.0);
-
-                        ui.label(format!("Year {y}"));
-                        ui.label(format!("{chk:.0} €"));
-                        ui.label(format!("{fest:.0} €"));
-                        ui.label(format!("{bau:.0} €"));
-                        ui.colored_label(cyan, format!("{nom:.0} €"));
-                        ui.colored_label(if real >= nom * 0.9 { green } else { amber }, format!("{real:.0} €"));
-                        ui.colored_label(red, format!("-{loss:.0} €"));
-                        ui.label(format!("{ret:.1}%"));
-                        ui.label(format!("{m_real:.0} €/mo"));
+                egui::Grid::new("wealth_proj_grid")
+                    .striped(true)
+                    .min_col_width(95.0)
+                    .show(ui, |ui| {
+                        ui.strong("Year");
+                        ui.strong("Checking");
+                        ui.strong("Festgeld");
+                        ui.strong("Bausparer");
+                        ui.strong("Nominal Total (Bank App)");
+                        ui.strong("Real Value (True Goods)");
+                        ui.strong("Silent Inflation Loss");
+                        ui.strong("Value Kept");
+                        ui.strong("Real Monthly Income");
                         ui.end_row();
-                    }
-                });
+
+                        for p in proj {
+                            let y = p["year"].as_u64().unwrap_or(0);
+                            let chk = p["checking_eur"].as_f64().unwrap_or(0.0);
+                            let fest = p["festgeld_nominal_eur"].as_f64().unwrap_or(0.0);
+                            let bau = p["bausparer_nominal_eur"].as_f64().unwrap_or(0.0);
+                            let nom = p["total_nominal_wealth_eur"].as_f64().unwrap_or(0.0);
+                            let real = p["total_real_wealth_eur"].as_f64().unwrap_or(0.0);
+                            let loss = p["cumulative_inflation_loss_eur"].as_f64().unwrap_or(0.0);
+                            let ret = p["purchasing_power_retention_pct"].as_f64().unwrap_or(0.0);
+                            let m_real = p["monthly_purchasing_power_eur"].as_f64().unwrap_or(0.0);
+
+                            ui.label(format!("Year {y}"));
+                            ui.label(format!("{chk:.0} €"));
+                            ui.label(format!("{fest:.0} €"));
+                            ui.label(format!("{bau:.0} €"));
+                            ui.colored_label(cyan, format!("{nom:.0} €"));
+                            ui.colored_label(
+                                if real >= nom * 0.9 { green } else { amber },
+                                format!("{real:.0} €"),
+                            );
+                            ui.colored_label(red, format!("-{loss:.0} €"));
+                            ui.label(format!("{ret:.1}%"));
+                            ui.label(format!("{m_real:.0} €/mo"));
+                            ui.end_row();
+                        }
+                    });
             }
 
             ui.add_space(12.0);
             // 5. Educational Antidote Cards (Money for Beginners)
-            ui.strong(egui::RichText::new("SOLUTIONS: HOW TO DEFEND YOUR CAPITAL (ACTIONABLE ROADMAP)").color(green));
+            ui.strong(
+                egui::RichText::new("SOLUTIONS: HOW TO DEFEND YOUR CAPITAL (ACTIONABLE ROADMAP)")
+                    .color(green),
+            );
             if let Some(tips) = rep_val["inflation_antidotes"].as_array() {
                 ui.horizontal(|ui| {
                     for t in tips {
@@ -954,7 +1289,11 @@ impl MoneyCraftGui {
 
                         egui::Frame::group(ui.style()).show(ui, |ui| {
                             ui.set_max_width(260.0);
-                            ui.label(egui::RichText::new(format!("[{cat}]")).color(amber).monospace());
+                            ui.label(
+                                egui::RichText::new(format!("[{cat}]"))
+                                    .color(amber)
+                                    .monospace(),
+                            );
                             ui.strong(title);
                             ui.label(exp);
                             ui.separator();
@@ -1093,7 +1432,12 @@ impl MoneyCraftGui {
 
         // Top Toolbar: Data Feed Source Selector & Real/Delayed Status
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("📡 FEED SOURCE:").color(amber).monospace().strong());
+            ui.label(
+                egui::RichText::new("📡 FEED SOURCE:")
+                    .color(amber)
+                    .monospace()
+                    .strong(),
+            );
             let current_source_name = match self.active_data_source.as_str() {
                 "binance" => "⚡ Binance (Live 0s, $0)",
                 "hyperliquid" => "⚡ Hyperliquid L1 (Live 0s, $0)",
@@ -1109,33 +1453,100 @@ impl MoneyCraftGui {
             egui::ComboBox::from_id_salt("feed_source_combo")
                 .selected_text(current_source_name)
                 .show_ui(ui, |ui| {
-                    if ui.selectable_value(&mut self.active_data_source, "synthetic".to_string(), "⚡ Synthetic Offline (0ms, $0)").clicked() {
+                    if ui
+                        .selectable_value(
+                            &mut self.active_data_source,
+                            "synthetic".to_string(),
+                            "⚡ Synthetic Offline (0ms, $0)",
+                        )
+                        .clicked()
+                    {
                         self.fetch_market_feed();
                     }
-                    if ui.selectable_value(&mut self.active_data_source, "binance".to_string(), "⚡ Binance Public (Real-Time 0s, $0)").clicked() {
+                    if ui
+                        .selectable_value(
+                            &mut self.active_data_source,
+                            "binance".to_string(),
+                            "⚡ Binance Public (Real-Time 0s, $0)",
+                        )
+                        .clicked()
+                    {
                         self.fetch_market_feed();
                     }
-                    if ui.selectable_value(&mut self.active_data_source, "hyperliquid".to_string(), "⚡ Hyperliquid L1 DEX (Real-Time 0s, $0)").clicked() {
+                    if ui
+                        .selectable_value(
+                            &mut self.active_data_source,
+                            "hyperliquid".to_string(),
+                            "⚡ Hyperliquid L1 DEX (Real-Time 0s, $0)",
+                        )
+                        .clicked()
+                    {
                         self.fetch_market_feed();
                     }
-                    if ui.selectable_value(&mut self.active_data_source, "yahoo".to_string(), "⏱️ Yahoo Finance (15m Delay, $0)").clicked() {
+                    if ui
+                        .selectable_value(
+                            &mut self.active_data_source,
+                            "yahoo".to_string(),
+                            "⏱️ Yahoo Finance (15m Delay, $0)",
+                        )
+                        .clicked()
+                    {
                         self.fetch_market_feed();
                     }
-                    if ui.selectable_value(&mut self.active_data_source, "ecb".to_string(), "📅 ECB Euro Reference (Daily, $0)").clicked() {
+                    if ui
+                        .selectable_value(
+                            &mut self.active_data_source,
+                            "ecb".to_string(),
+                            "📅 ECB Euro Reference (Daily, $0)",
+                        )
+                        .clicked()
+                    {
                         self.fetch_market_feed();
                     }
                     ui.separator();
-                    ui.label(egui::RichText::new("🔒 EXCHANGE PAYOLA TIERS").color(amber).small());
-                    if ui.selectable_value(&mut self.active_data_source, "twelve_data".to_string(), "TwelveData Pro ($29/mo)").clicked() {
+                    ui.label(
+                        egui::RichText::new("🔒 EXCHANGE PAYOLA TIERS")
+                            .color(amber)
+                            .small(),
+                    );
+                    if ui
+                        .selectable_value(
+                            &mut self.active_data_source,
+                            "twelve_data".to_string(),
+                            "TwelveData Pro ($29/mo)",
+                        )
+                        .clicked()
+                    {
                         self.fetch_market_feed();
                     }
-                    if ui.selectable_value(&mut self.active_data_source, "interactive_brokers".to_string(), "IBKR Gateway ($1.50/mo exchange fee)").clicked() {
+                    if ui
+                        .selectable_value(
+                            &mut self.active_data_source,
+                            "interactive_brokers".to_string(),
+                            "IBKR Gateway ($1.50/mo exchange fee)",
+                        )
+                        .clicked()
+                    {
                         self.fetch_market_feed();
                     }
-                    if ui.selectable_value(&mut self.active_data_source, "polygon_io".to_string(), "Polygon.io SIP ($29-$199/mo)").clicked() {
+                    if ui
+                        .selectable_value(
+                            &mut self.active_data_source,
+                            "polygon_io".to_string(),
+                            "Polygon.io SIP ($29-$199/mo)",
+                        )
+                        .clicked()
+                    {
                         self.fetch_market_feed();
                     }
-                    if ui.selectable_value(&mut self.active_data_source, "bloomberg_bpipe".to_string(), "Bloomberg B-PIPE ($2,500/mo)").clicked() {
+                    if ui
+                        .selectable_value(
+                            &mut self.active_data_source,
+                            "bloomberg_bpipe".to_string(),
+                            "Bloomberg B-PIPE ($2,500/mo)",
+                        )
+                        .clicked()
+                    {
                         self.fetch_market_feed();
                     }
                 });
@@ -1159,75 +1570,152 @@ impl MoneyCraftGui {
         // Sub-toolbar: Date Ranges, Timeframes, Chart Styles & Overlays
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("RANGE:").color(amber).monospace());
-            if ui.selectable_label(self.date_preset == DateRangePreset::Day1, "1D").clicked() {
+            if ui
+                .selectable_label(self.date_preset == DateRangePreset::Day1, "1D")
+                .clicked()
+            {
                 self.set_date_preset(DateRangePreset::Day1);
             }
-            if ui.selectable_label(self.date_preset == DateRangePreset::Week1, "1W").clicked() {
+            if ui
+                .selectable_label(self.date_preset == DateRangePreset::Week1, "1W")
+                .clicked()
+            {
                 self.set_date_preset(DateRangePreset::Week1);
             }
-            if ui.selectable_label(self.date_preset == DateRangePreset::Month1, "1M").clicked() {
+            if ui
+                .selectable_label(self.date_preset == DateRangePreset::Month1, "1M")
+                .clicked()
+            {
                 self.set_date_preset(DateRangePreset::Month1);
             }
-            if ui.selectable_label(self.date_preset == DateRangePreset::Month3, "3M").clicked() {
+            if ui
+                .selectable_label(self.date_preset == DateRangePreset::Month3, "3M")
+                .clicked()
+            {
                 self.set_date_preset(DateRangePreset::Month3);
             }
-            if ui.selectable_label(self.date_preset == DateRangePreset::YearToDate, "YTD").clicked() {
+            if ui
+                .selectable_label(self.date_preset == DateRangePreset::YearToDate, "YTD")
+                .clicked()
+            {
                 self.set_date_preset(DateRangePreset::YearToDate);
             }
-            if ui.selectable_label(self.date_preset == DateRangePreset::Year1, "1Y").clicked() {
+            if ui
+                .selectable_label(self.date_preset == DateRangePreset::Year1, "1Y")
+                .clicked()
+            {
                 self.set_date_preset(DateRangePreset::Year1);
             }
-            if ui.selectable_label(self.date_preset == DateRangePreset::Year5, "5Y").clicked() {
+            if ui
+                .selectable_label(self.date_preset == DateRangePreset::Year5, "5Y")
+                .clicked()
+            {
                 self.set_date_preset(DateRangePreset::Year5);
             }
-            if ui.selectable_label(self.date_preset == DateRangePreset::Max1990, "MAX (1990)").clicked() {
+            if ui
+                .selectable_label(self.date_preset == DateRangePreset::Max1990, "MAX (1990)")
+                .clicked()
+            {
                 self.set_date_preset(DateRangePreset::Max1990);
                 self.show_historic_panics = true;
             }
-            if ui.selectable_label(self.date_preset == DateRangePreset::Historic1850, "HISTORIC (1850)").clicked() {
+            if ui
+                .selectable_label(
+                    self.date_preset == DateRangePreset::Historic1850,
+                    "HISTORIC (1850)",
+                )
+                .clicked()
+            {
                 self.set_date_preset(DateRangePreset::Historic1850);
                 self.show_historic_panics = true;
             }
-            if ui.selectable_label(self.date_preset == DateRangePreset::AllTime1720, "ALL-TIME (1720)").clicked() {
+            if ui
+                .selectable_label(
+                    self.date_preset == DateRangePreset::AllTime1720,
+                    "ALL-TIME (1720)",
+                )
+                .clicked()
+            {
                 self.set_date_preset(DateRangePreset::AllTime1720);
                 self.show_historic_panics = true;
             }
 
             ui.separator();
             ui.label(egui::RichText::new("STYLE:").color(amber).monospace());
-            if ui.selectable_label(self.chart_style == ChartStyle::Candlestick, "🕯️ Candlestick").clicked() {
+            if ui
+                .selectable_label(
+                    self.chart_style == ChartStyle::Candlestick,
+                    "🕯️ Candlestick",
+                )
+                .clicked()
+            {
                 self.chart_style = ChartStyle::Candlestick;
             }
-            if ui.selectable_label(self.chart_style == ChartStyle::MountainArea, "📈 Mountain Area").clicked() {
+            if ui
+                .selectable_label(
+                    self.chart_style == ChartStyle::MountainArea,
+                    "📈 Mountain Area",
+                )
+                .clicked()
+            {
                 self.chart_style = ChartStyle::MountainArea;
             }
-            if ui.selectable_label(self.chart_style == ChartStyle::HeikinAshi, "📊 Heikin-Ashi").clicked() {
+            if ui
+                .selectable_label(self.chart_style == ChartStyle::HeikinAshi, "📊 Heikin-Ashi")
+                .clicked()
+            {
                 self.chart_style = ChartStyle::HeikinAshi;
             }
 
             ui.separator();
             ui.label(egui::RichText::new("OVERLAYS:").color(amber).monospace());
-            ui.toggle_value(&mut self.show_sma20, egui::RichText::new("SMA20").color(cyan));
-            ui.toggle_value(&mut self.show_ema50, egui::RichText::new("EMA50").color(gold));
-            ui.toggle_value(&mut self.show_bollinger, egui::RichText::new("BBands").color(purple));
+            ui.toggle_value(
+                &mut self.show_sma20,
+                egui::RichText::new("SMA20").color(cyan),
+            );
+            ui.toggle_value(
+                &mut self.show_ema50,
+                egui::RichText::new("EMA50").color(gold),
+            );
+            ui.toggle_value(
+                &mut self.show_bollinger,
+                egui::RichText::new("BBands").color(purple),
+            );
             ui.toggle_value(&mut self.show_volume, "Vol");
             ui.toggle_value(&mut self.show_rsi, "RSI");
-            ui.toggle_value(&mut self.show_historic_panics, egui::RichText::new("🚩 Panics").color(red));
+            ui.toggle_value(
+                &mut self.show_historic_panics,
+                egui::RichText::new("🚩 Panics").color(red),
+            );
         });
         ui.separator();
 
         // High-Density Bloomberg Time-Series Graph Area
         let available_size = ui.available_size();
         let chart_height = (available_size.y - 40.0).max(360.0);
-        let (response, painter) = ui.allocate_painter(Vec2::new(available_size.x, chart_height), egui::Sense::hover());
+        let (response, painter) = ui.allocate_painter(
+            Vec2::new(available_size.x, chart_height),
+            egui::Sense::hover(),
+        );
         let rect = response.rect;
 
         // Black Obsidian Canvas Background
         painter.rect_filled(rect, 4.0, Color32::from_rgb(6, 8, 12));
-        painter.rect_stroke(rect, 4.0, Stroke::new(1.0, Color32::from_rgb(33, 41, 54)), egui::StrokeKind::Inside);
+        painter.rect_stroke(
+            rect,
+            4.0,
+            Stroke::new(1.0, Color32::from_rgb(33, 41, 54)),
+            egui::StrokeKind::Inside,
+        );
 
         let Some(ref mkt) = self.market_data else {
-            painter.text(rect.center(), egui::Align2::CENTER_CENTER, "No market data loaded", egui::FontId::proportional(16.0), Color32::WHITE);
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "No market data loaded",
+                egui::FontId::proportional(16.0),
+                Color32::WHITE,
+            );
             return;
         };
 
@@ -1252,7 +1740,8 @@ impl MoneyCraftGui {
         let vol_height = if has_vol { 60.0 } else { 0.0 };
 
         let total_w = rect.width() - margin_left - margin_right;
-        let main_chart_h = rect.height() - top_padding - bottom_padding - rsi_height - vol_height - 16.0;
+        let main_chart_h =
+            rect.height() - top_padding - bottom_padding - rsi_height - vol_height - 16.0;
 
         let main_top = rect.top() + top_padding;
         let main_bottom = main_top + main_chart_h;
@@ -1260,7 +1749,11 @@ impl MoneyCraftGui {
         let vol_top = main_bottom + 8.0;
         let vol_bottom = vol_top + vol_height;
 
-        let rsi_top = if has_vol { vol_bottom + 8.0 } else { main_bottom + 8.0 };
+        let rsi_top = if has_vol {
+            vol_bottom + 8.0
+        } else {
+            main_bottom + 8.0
+        };
         let rsi_bottom = rsi_top + rsi_height;
 
         // Calculate min/max price for auto-scaling
@@ -1272,9 +1765,15 @@ impl MoneyCraftGui {
             let h = c["high"].as_f64().unwrap_or(1.0);
             let l = c["low"].as_f64().unwrap_or(1.0);
             let v = c["volume"].as_f64().unwrap_or(0.0);
-            if h > max_price { max_price = h; }
-            if l < min_price { min_price = l; }
-            if v > max_vol { max_vol = v; }
+            if h > max_price {
+                max_price = h;
+            }
+            if l < min_price {
+                min_price = l;
+            }
+            if v > max_vol {
+                max_vol = v;
+            }
         }
 
         // Add 5% padding
@@ -1289,9 +1788,7 @@ impl MoneyCraftGui {
         };
 
         let step_x = total_w / (n as f32);
-        let to_x = |idx: usize| -> f32 {
-            rect.left() + margin_left + (idx as f32 + 0.5) * step_x
-        };
+        let to_x = |idx: usize| -> f32 { rect.left() + margin_left + (idx as f32 + 0.5) * step_x };
 
         // Horizontal Grid Lines & Price Labels
         for i in 0..=5 {
@@ -1300,13 +1797,23 @@ impl MoneyCraftGui {
             let y = to_y(val);
 
             painter.line_segment(
-                [Pos2::new(rect.left() + margin_left, y), Pos2::new(rect.right() - margin_right, y)],
+                [
+                    Pos2::new(rect.left() + margin_left, y),
+                    Pos2::new(rect.right() - margin_right, y),
+                ],
                 Stroke::new(0.8, Color32::from_rgb(20, 26, 36)),
             );
 
-            let is_fx = self.selected_symbol.contains("EUR") || self.selected_symbol.contains("JPY") || self.selected_symbol.contains("GBP") || self.selected_symbol.contains("CNY");
+            let is_fx = self.selected_symbol.contains("EUR")
+                || self.selected_symbol.contains("JPY")
+                || self.selected_symbol.contains("GBP")
+                || self.selected_symbol.contains("CNY");
             let label = if is_fx {
-                if self.selected_symbol.contains("JPY") { format!("{val:.2}") } else { format!("{val:.4}") }
+                if self.selected_symbol.contains("JPY") {
+                    format!("{val:.2}")
+                } else {
+                    format!("{val:.4}")
+                }
             } else {
                 format!("{val:.2}")
             };
@@ -1323,11 +1830,16 @@ impl MoneyCraftGui {
         // Bollinger Bands Background Ribbon
         if self.show_bollinger {
             if let Some(inds) = mkt.get("indicators") {
-                if let (Some(u_arr), Some(l_arr)) = (inds["bb_upper"].as_array(), inds["bb_lower"].as_array()) {
+                if let (Some(u_arr), Some(l_arr)) =
+                    (inds["bb_upper"].as_array(), inds["bb_lower"].as_array())
+                {
                     let mut points_upper = Vec::new();
                     let mut points_lower = Vec::new();
                     for idx in 0..n {
-                        if let (Some(u), Some(l)) = (u_arr.get(idx).and_then(|v| v.as_f64()), l_arr.get(idx).and_then(|v| v.as_f64())) {
+                        if let (Some(u), Some(l)) = (
+                            u_arr.get(idx).and_then(|v| v.as_f64()),
+                            l_arr.get(idx).and_then(|v| v.as_f64()),
+                        ) {
                             let x = to_x(idx);
                             points_upper.push(Pos2::new(x, to_y(u)));
                             points_lower.push(Pos2::new(x, to_y(l)));
@@ -1344,8 +1856,20 @@ impl MoneyCraftGui {
                                 Color32::from_rgba_unmultiplied(179, 136, 255, 20),
                                 Stroke::NONE,
                             ));
-                            painter.line_segment([p1, p2], Stroke::new(1.0, Color32::from_rgba_unmultiplied(179, 136, 255, 90)));
-                            painter.line_segment([p4, p3], Stroke::new(1.0, Color32::from_rgba_unmultiplied(179, 136, 255, 90)));
+                            painter.line_segment(
+                                [p1, p2],
+                                Stroke::new(
+                                    1.0,
+                                    Color32::from_rgba_unmultiplied(179, 136, 255, 90),
+                                ),
+                            );
+                            painter.line_segment(
+                                [p4, p3],
+                                Stroke::new(
+                                    1.0,
+                                    Color32::from_rgba_unmultiplied(179, 136, 255, 90),
+                                ),
+                            );
                         }
                     }
                 }
@@ -1393,12 +1917,22 @@ impl MoneyCraftGui {
                 let y_close = to_y(close);
 
                 // Wick
-                painter.line_segment([Pos2::new(x, y_high), Pos2::new(x, y_low)], Stroke::new(1.0, candle_color));
+                painter.line_segment(
+                    [Pos2::new(x, y_high), Pos2::new(x, y_low)],
+                    Stroke::new(1.0, candle_color),
+                );
 
                 // Body
-                let (top, bot) = if y_open > y_close { (y_close, y_open) } else { (y_open, y_close) };
+                let (top, bot) = if y_open > y_close {
+                    (y_close, y_open)
+                } else {
+                    (y_open, y_close)
+                };
                 let body_h = (bot - top).max(1.5);
-                let candle_rect = Rect::from_center_size(Pos2::new(x, top + body_h * 0.5), Vec2::new(bar_w, body_h));
+                let candle_rect = Rect::from_center_size(
+                    Pos2::new(x, top + body_h * 0.5),
+                    Vec2::new(bar_w, body_h),
+                );
                 painter.rect_filled(candle_rect, 1.0, candle_color);
             }
         }
@@ -1441,8 +1975,20 @@ impl MoneyCraftGui {
 
         // Volume Profile Sub-Panel
         if has_vol {
-            painter.line_segment([Pos2::new(rect.left(), vol_top), Pos2::new(rect.right(), vol_top)], Stroke::new(1.0, Color32::from_rgb(25, 32, 44)));
-            painter.text(Pos2::new(rect.left() + 6.0, vol_top + 4.0), egui::Align2::LEFT_TOP, "VOL", egui::FontId::monospace(10.0), Color32::from_rgb(140, 150, 165));
+            painter.line_segment(
+                [
+                    Pos2::new(rect.left(), vol_top),
+                    Pos2::new(rect.right(), vol_top),
+                ],
+                Stroke::new(1.0, Color32::from_rgb(25, 32, 44)),
+            );
+            painter.text(
+                Pos2::new(rect.left() + 6.0, vol_top + 4.0),
+                egui::Align2::LEFT_TOP,
+                "VOL",
+                egui::FontId::monospace(10.0),
+                Color32::from_rgb(140, 150, 165),
+            );
 
             let safe_max_vol = max_vol.max(1.0);
             for (idx, c) in candles.iter().enumerate() {
@@ -1458,7 +2004,10 @@ impl MoneyCraftGui {
                 };
 
                 let h = ((v / safe_max_vol) as f32 * (vol_height - 6.0)).max(1.0);
-                let v_rect = Rect::from_min_max(Pos2::new(x - bar_w * 0.45, vol_bottom - h), Pos2::new(x + bar_w * 0.45, vol_bottom));
+                let v_rect = Rect::from_min_max(
+                    Pos2::new(x - bar_w * 0.45, vol_bottom - h),
+                    Pos2::new(x + bar_w * 0.45, vol_bottom),
+                );
                 painter.rect_filled(v_rect, 0.5, c_color);
             }
         }
@@ -1489,7 +2038,10 @@ impl MoneyCraftGui {
                     );
 
                     // Panic Badge Banner
-                    let badge_rect = Rect::from_min_size(Pos2::new(px - 16.0, main_top + 4.0), Vec2::new(32.0, 14.0));
+                    let badge_rect = Rect::from_min_size(
+                        Pos2::new(px - 16.0, main_top + 4.0),
+                        Vec2::new(32.0, 14.0),
+                    );
                     painter.rect_filled(badge_rect, 2.0, Color32::from_rgb(180, 15, 45));
                     painter.text(
                         badge_rect.center(),
@@ -1501,14 +2053,29 @@ impl MoneyCraftGui {
 
                     // Hover tooltip trigger if mouse is near vertical marker line
                     if let Some(mouse_pos) = response.hover_pos() {
-                        if (mouse_pos.x - px).abs() < 12.0 && mouse_pos.y >= main_top && mouse_pos.y <= main_bottom {
+                        if (mouse_pos.x - px).abs() < 12.0
+                            && mouse_pos.y >= main_top
+                            && mouse_pos.y <= main_bottom
+                        {
                             let tip_w = 340.0;
                             let tip_h = 130.0;
                             let tip_x = (px + 10.0).min(rect.right() - tip_w - 10.0);
-                            let tip_rect = Rect::from_min_size(Pos2::new(tip_x, mouse_pos.y.min(main_bottom - tip_h)), Vec2::new(tip_w, tip_h));
+                            let tip_rect = Rect::from_min_size(
+                                Pos2::new(tip_x, mouse_pos.y.min(main_bottom - tip_h)),
+                                Vec2::new(tip_w, tip_h),
+                            );
 
-                            painter.rect_filled(tip_rect, 4.0, Color32::from_rgba_unmultiplied(15, 18, 26, 245));
-                            painter.rect_stroke(tip_rect, 4.0, Stroke::new(1.0, Color32::from_rgb(255, 23, 68)), egui::StrokeKind::Inside);
+                            painter.rect_filled(
+                                tip_rect,
+                                4.0,
+                                Color32::from_rgba_unmultiplied(15, 18, 26, 245),
+                            );
+                            painter.rect_stroke(
+                                tip_rect,
+                                4.0,
+                                Stroke::new(1.0, Color32::from_rgb(255, 23, 68)),
+                                egui::StrokeKind::Inside,
+                            );
 
                             let tip_txt = format!(
                                 "🚩 CRISIS: {}\nDATE: {} | DROP: {:.1}%\nEPICENTER: {}\nCATALYST: {}\nLESSON: {}",
@@ -1529,8 +2096,20 @@ impl MoneyCraftGui {
 
         // RSI 14 Sub-Panel
         if has_rsi {
-            painter.line_segment([Pos2::new(rect.left(), rsi_top), Pos2::new(rect.right(), rsi_top)], Stroke::new(1.0, Color32::from_rgb(25, 32, 44)));
-            painter.text(Pos2::new(rect.left() + 6.0, rsi_top + 4.0), egui::Align2::LEFT_TOP, "RSI 14", egui::FontId::monospace(10.0), Color32::from_rgb(140, 150, 165));
+            painter.line_segment(
+                [
+                    Pos2::new(rect.left(), rsi_top),
+                    Pos2::new(rect.right(), rsi_top),
+                ],
+                Stroke::new(1.0, Color32::from_rgb(25, 32, 44)),
+            );
+            painter.text(
+                Pos2::new(rect.left() + 6.0, rsi_top + 4.0),
+                egui::Align2::LEFT_TOP,
+                "RSI 14",
+                egui::FontId::monospace(10.0),
+                Color32::from_rgb(140, 150, 165),
+            );
 
             // Threshold bands: 70 and 30
             let rsi_to_y = |val: f64| -> f32 {
@@ -1540,8 +2119,20 @@ impl MoneyCraftGui {
 
             let y70 = rsi_to_y(70.0);
             let y30 = rsi_to_y(30.0);
-            painter.line_segment([Pos2::new(rect.left() + margin_left, y70), Pos2::new(rect.right() - margin_right, y70)], Stroke::new(0.8, Color32::from_rgb(45, 55, 75)));
-            painter.line_segment([Pos2::new(rect.left() + margin_left, y30), Pos2::new(rect.right() - margin_right, y30)], Stroke::new(0.8, Color32::from_rgb(45, 55, 75)));
+            painter.line_segment(
+                [
+                    Pos2::new(rect.left() + margin_left, y70),
+                    Pos2::new(rect.right() - margin_right, y70),
+                ],
+                Stroke::new(0.8, Color32::from_rgb(45, 55, 75)),
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(rect.left() + margin_left, y30),
+                    Pos2::new(rect.right() - margin_right, y30),
+                ],
+                Stroke::new(0.8, Color32::from_rgb(45, 55, 75)),
+            );
 
             if let Some(inds) = mkt.get("indicators") {
                 if let Some(arr) = inds["rsi_14"].as_array() {
@@ -1561,18 +2152,32 @@ impl MoneyCraftGui {
 
         // Interactive Crosshair & Floating HUD
         if let Some(mouse_pos) = response.hover_pos() {
-            if mouse_pos.x >= rect.left() + margin_left && mouse_pos.x <= rect.right() - margin_right {
+            if mouse_pos.x >= rect.left() + margin_left
+                && mouse_pos.x <= rect.right() - margin_right
+            {
                 let hover_x = mouse_pos.x;
                 let rel_x = hover_x - (rect.left() + margin_left);
                 let bar_idx = ((rel_x / step_x).floor() as usize).min(n.saturating_sub(1));
 
                 // Vertical Crosshair line
                 let cross_x = to_x(bar_idx);
-                painter.line_segment([Pos2::new(cross_x, rect.top()), Pos2::new(cross_x, rect.bottom())], Stroke::new(1.0, Color32::from_rgb(80, 95, 120)));
+                painter.line_segment(
+                    [
+                        Pos2::new(cross_x, rect.top()),
+                        Pos2::new(cross_x, rect.bottom()),
+                    ],
+                    Stroke::new(1.0, Color32::from_rgb(80, 95, 120)),
+                );
 
                 // Horizontal Crosshair line in main chart
                 if mouse_pos.y <= main_bottom {
-                    painter.line_segment([Pos2::new(rect.left() + margin_left, mouse_pos.y), Pos2::new(rect.right() - margin_right, mouse_pos.y)], Stroke::new(1.0, Color32::from_rgb(80, 95, 120)));
+                    painter.line_segment(
+                        [
+                            Pos2::new(rect.left() + margin_left, mouse_pos.y),
+                            Pos2::new(rect.right() - margin_right, mouse_pos.y),
+                        ],
+                        Stroke::new(1.0, Color32::from_rgb(80, 95, 120)),
+                    );
                 }
 
                 // Floating HUD Tooltip Card
@@ -1583,14 +2188,32 @@ impl MoneyCraftGui {
                     let cl = c["close"].as_f64().unwrap_or(0.0);
                     let v = c["volume"].as_f64().unwrap_or(0.0);
 
-                    let hud_rect = Rect::from_min_size(Pos2::new(rect.left() + margin_left + 8.0, main_top + 8.0), Vec2::new(260.0, 95.0));
-                    painter.rect_filled(hud_rect, 4.0, Color32::from_rgba_unmultiplied(12, 16, 24, 230));
-                    painter.rect_stroke(hud_rect, 4.0, Stroke::new(1.0, Color32::from_rgb(45, 55, 75)), egui::StrokeKind::Inside);
+                    let hud_rect = Rect::from_min_size(
+                        Pos2::new(rect.left() + margin_left + 8.0, main_top + 8.0),
+                        Vec2::new(260.0, 95.0),
+                    );
+                    painter.rect_filled(
+                        hud_rect,
+                        4.0,
+                        Color32::from_rgba_unmultiplied(12, 16, 24, 230),
+                    );
+                    painter.rect_stroke(
+                        hud_rect,
+                        4.0,
+                        Stroke::new(1.0, Color32::from_rgb(45, 55, 75)),
+                        egui::StrokeKind::Inside,
+                    );
 
                     let hud_txt = format!(
                         "BAR #{bar_idx} | O: {o:.4} H: {h:.4}\nL: {l:.4} C: {cl:.4}\nVOL: {v:.1}"
                     );
-                    painter.text(Pos2::new(hud_rect.left() + 8.0, hud_rect.top() + 8.0), egui::Align2::LEFT_TOP, hud_txt, egui::FontId::monospace(11.0), Color32::WHITE);
+                    painter.text(
+                        Pos2::new(hud_rect.left() + 8.0, hud_rect.top() + 8.0),
+                        egui::Align2::LEFT_TOP,
+                        hud_txt,
+                        egui::FontId::monospace(11.0),
+                        Color32::WHITE,
+                    );
                 }
             }
         }
@@ -1602,33 +2225,53 @@ impl MoneyCraftGui {
             Color32::from_rgb(0, 229, 255),   // Cyan
             Color32::from_rgb(255, 214, 0),   // Gold
             Color32::from_rgb(0, 230, 118),   // Jade
-            Color32::from_rgb(255, 23, 68),    // Crimson
+            Color32::from_rgb(255, 23, 68),   // Crimson
             Color32::from_rgb(179, 136, 255), // Purple
             Color32::from_rgb(255, 128, 0),   // Orange
         ];
 
-        ui.heading(egui::RichText::new("📈 MULTI-ASSET NORMALIZED COMPARISON OVERLAYS").color(amber));
+        ui.heading(
+            egui::RichText::new("📈 MULTI-ASSET NORMALIZED COMPARISON OVERLAYS").color(amber),
+        );
         ui.label("Direct correlation and relative percentage return comparison against global benchmarks (Baseline = 0.0%):");
 
         // Sub-toolbar: Date Ranges & Active Ticker Tags
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("DATE RANGE:").color(amber).monospace());
-            if ui.selectable_label(self.date_preset == DateRangePreset::Day1, "1D").clicked() {
+            if ui
+                .selectable_label(self.date_preset == DateRangePreset::Day1, "1D")
+                .clicked()
+            {
                 self.set_date_preset(DateRangePreset::Day1);
             }
-            if ui.selectable_label(self.date_preset == DateRangePreset::Week1, "1W").clicked() {
+            if ui
+                .selectable_label(self.date_preset == DateRangePreset::Week1, "1W")
+                .clicked()
+            {
                 self.set_date_preset(DateRangePreset::Week1);
             }
-            if ui.selectable_label(self.date_preset == DateRangePreset::Month1, "1M").clicked() {
+            if ui
+                .selectable_label(self.date_preset == DateRangePreset::Month1, "1M")
+                .clicked()
+            {
                 self.set_date_preset(DateRangePreset::Month1);
             }
-            if ui.selectable_label(self.date_preset == DateRangePreset::Month3, "3M").clicked() {
+            if ui
+                .selectable_label(self.date_preset == DateRangePreset::Month3, "3M")
+                .clicked()
+            {
                 self.set_date_preset(DateRangePreset::Month3);
             }
-            if ui.selectable_label(self.date_preset == DateRangePreset::YearToDate, "YTD").clicked() {
+            if ui
+                .selectable_label(self.date_preset == DateRangePreset::YearToDate, "YTD")
+                .clicked()
+            {
                 self.set_date_preset(DateRangePreset::YearToDate);
             }
-            if ui.selectable_label(self.date_preset == DateRangePreset::Year1, "1Y").clicked() {
+            if ui
+                .selectable_label(self.date_preset == DateRangePreset::Year1, "1Y")
+                .clicked()
+            {
                 self.set_date_preset(DateRangePreset::Year1);
             }
 
@@ -1643,14 +2286,28 @@ impl MoneyCraftGui {
 
         let available_size = ui.available_size();
         let chart_height = (available_size.y - 40.0).max(380.0);
-        let (response, painter) = ui.allocate_painter(Vec2::new(available_size.x, chart_height), egui::Sense::hover());
+        let (response, painter) = ui.allocate_painter(
+            Vec2::new(available_size.x, chart_height),
+            egui::Sense::hover(),
+        );
         let rect = response.rect;
 
         painter.rect_filled(rect, 4.0, Color32::from_rgb(6, 8, 12));
-        painter.rect_stroke(rect, 4.0, Stroke::new(1.0, Color32::from_rgb(33, 41, 54)), egui::StrokeKind::Inside);
+        painter.rect_stroke(
+            rect,
+            4.0,
+            Stroke::new(1.0, Color32::from_rgb(33, 41, 54)),
+            egui::StrokeKind::Inside,
+        );
 
         let Some(ref comp) = self.comparison_data else {
-            painter.text(rect.center(), egui::Align2::CENTER_CENTER, "Loading multi-symbol comparison feeds...", egui::FontId::proportional(16.0), Color32::WHITE);
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "Loading multi-symbol comparison feeds...",
+                egui::FontId::proportional(16.0),
+                Color32::WHITE,
+            );
             return;
         };
 
@@ -1680,8 +2337,12 @@ impl MoneyCraftGui {
             if let Some(ret_arr) = s["normalized_pct_series"].as_array() {
                 for r in ret_arr {
                     if let Some(val) = r.as_f64() {
-                        if val > max_pct { max_pct = val; }
-                        if val < min_pct { min_pct = val; }
+                        if val > max_pct {
+                            max_pct = val;
+                        }
+                        if val < min_pct {
+                            min_pct = val;
+                        }
                     }
                 }
             }
@@ -1700,7 +2361,10 @@ impl MoneyCraftGui {
         // Baseline (0.0% return dashed line)
         let y_zero = to_y(0.0);
         painter.line_segment(
-            [Pos2::new(rect.left() + margin_left, y_zero), Pos2::new(rect.right() - margin_right, y_zero)],
+            [
+                Pos2::new(rect.left() + margin_left, y_zero),
+                Pos2::new(rect.right() - margin_right, y_zero),
+            ],
             Stroke::new(1.2, Color32::from_rgb(100, 115, 140)),
         );
         painter.text(
@@ -1718,7 +2382,10 @@ impl MoneyCraftGui {
             let y = to_y(val);
 
             painter.line_segment(
-                [Pos2::new(rect.left() + margin_left, y), Pos2::new(rect.right() - margin_right, y)],
+                [
+                    Pos2::new(rect.left() + margin_left, y),
+                    Pos2::new(rect.right() - margin_right, y),
+                ],
                 Stroke::new(0.8, Color32::from_rgb(20, 26, 36)),
             );
 
@@ -1738,13 +2405,18 @@ impl MoneyCraftGui {
 
             if let Some(ret_arr) = s["normalized_pct_series"].as_array() {
                 let n = ret_arr.len();
-                if n < 2 { continue; }
+                if n < 2 {
+                    continue;
+                }
                 let step_x = total_w / ((n - 1) as f32);
 
                 let mut prev = None;
                 for (b_idx, r) in ret_arr.iter().enumerate() {
                     if let Some(val) = r.as_f64() {
-                        let curr = Pos2::new(rect.left() + margin_left + (b_idx as f32) * step_x, to_y(val));
+                        let curr = Pos2::new(
+                            rect.left() + margin_left + (b_idx as f32) * step_x,
+                            to_y(val),
+                        );
                         if let Some(p) = prev {
                             painter.line_segment([p, curr], Stroke::new(2.0, stroke_color));
                         }
@@ -1773,7 +2445,9 @@ impl MoneyCraftGui {
         let red = Color32::from_rgb(255, 23, 68);
         let cyan = Color32::from_rgb(0, 229, 255);
 
-        ui.heading(egui::RichText::new("🔥 CRYPTO PERPETUAL FUTURES & LIQUIDATION HEATMAP").color(amber));
+        ui.heading(
+            egui::RichText::new("🔥 CRYPTO PERPETUAL FUTURES & LIQUIDATION HEATMAP").color(amber),
+        );
         ui.label("Institutional order flow, forward-looking liquidation cascades, and Hyperliquid funding arbitrage:");
 
         ui.add_space(8.0);
@@ -1787,7 +2461,11 @@ impl MoneyCraftGui {
                 // 1. Funding Arbitrage Banner
                 egui::Frame::group(ui.style()).show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("⚡ DELTA-NEUTRAL FUNDING ARBITRAGE SPREAD:").strong().color(amber));
+                        ui.label(
+                            egui::RichText::new("⚡ DELTA-NEUTRAL FUNDING ARBITRAGE SPREAD:")
+                                .strong()
+                                .color(amber),
+                        );
                         ui.colored_label(green, format!("+{arb_apr:.2}% APR Yield"));
                         ui.separator();
                         ui.label(format!("Strategy: Long {arb_long} / Short {arb_short}"));
@@ -1797,66 +2475,91 @@ impl MoneyCraftGui {
                 ui.add_space(8.0);
                 ui.columns(2, |columns| {
                     // Left Column: Multi-Exchange Funding Rates
-                    columns[0].strong(egui::RichText::new("PERP VENUE FUNDING RATES (8H / ANNUALIZED)").color(amber));
+                    columns[0].strong(
+                        egui::RichText::new("PERP VENUE FUNDING RATES (8H / ANNUALIZED)")
+                            .color(amber),
+                    );
                     columns[0].add_space(4.0);
                     if let Some(rates) = d["funding_rates"].as_array() {
-                        egui::Grid::new("funding_rates_grid").striped(true).show(&mut columns[0], |ui| {
-                            ui.strong("Venue");
-                            ui.strong("8h Rate");
-                            ui.strong("Annual APR");
-                            ui.strong("Open Interest");
-                            ui.end_row();
-
-                            for r in rates {
-                                let v = r["venue"].as_str().unwrap_or("");
-                                let r8 = r["rate_8h_pct"].as_f64().unwrap_or(0.0);
-                                let apr = r["annualized_apr_pct"].as_f64().unwrap_or(0.0);
-                                let oi = r["open_interest_mil"].as_f64().unwrap_or(0.0);
-
-                                ui.label(v);
-                                ui.colored_label(if r8 >= 0.02 { green } else { cyan }, format!("{r8:.4}%"));
-                                ui.colored_label(if apr >= 20.0 { green } else { Color32::WHITE }, format!("{apr:.2}%"));
-                                ui.label(format!("${oi:.1}M"));
+                        egui::Grid::new("funding_rates_grid").striped(true).show(
+                            &mut columns[0],
+                            |ui| {
+                                ui.strong("Venue");
+                                ui.strong("8h Rate");
+                                ui.strong("Annual APR");
+                                ui.strong("Open Interest");
                                 ui.end_row();
-                            }
-                        });
+
+                                for r in rates {
+                                    let v = r["venue"].as_str().unwrap_or("");
+                                    let r8 = r["rate_8h_pct"].as_f64().unwrap_or(0.0);
+                                    let apr = r["annualized_apr_pct"].as_f64().unwrap_or(0.0);
+                                    let oi = r["open_interest_mil"].as_f64().unwrap_or(0.0);
+
+                                    ui.label(v);
+                                    ui.colored_label(
+                                        if r8 >= 0.02 { green } else { cyan },
+                                        format!("{r8:.4}%"),
+                                    );
+                                    ui.colored_label(
+                                        if apr >= 20.0 { green } else { Color32::WHITE },
+                                        format!("{apr:.2}%"),
+                                    );
+                                    ui.label(format!("${oi:.1}M"));
+                                    ui.end_row();
+                                }
+                            },
+                        );
                     }
 
                     // Right Column: Liquidation Heatmap Clusters
-                    columns[1].strong(egui::RichText::new("FORWARD-LOOKING LIQUIDATION HEATMAP").color(amber));
+                    columns[1].strong(
+                        egui::RichText::new("FORWARD-LOOKING LIQUIDATION HEATMAP").color(amber),
+                    );
                     columns[1].add_space(4.0);
                     if let Some(bands) = d["liquidation_heatmap"].as_array() {
-                        egui::Grid::new("liq_heatmap_grid").striped(true).show(&mut columns[1], |ui| {
-                            ui.strong("Price Level");
-                            ui.strong("Cluster Type");
-                            ui.strong("Cascade Notional");
-                            ui.strong("Distance");
-                            ui.end_row();
-
-                            for b in bands {
-                                let p = b["price_level"].as_f64().unwrap_or(0.0);
-                                let side = b["side"].as_str().unwrap_or("");
-                                let vol = b["volume_notional_mil"].as_f64().unwrap_or(0.0);
-                                let dist = b["distance_pct"].as_f64().unwrap_or(0.0);
-
-                                let (label, col) = if side == "SHORT_LIQ" {
-                                    ("🔥 SHORT SQUEEZE", red)
-                                } else {
-                                    ("🩸 LONG FLUSH", green)
-                                };
-
-                                ui.label(format!("${p:.2}"));
-                                ui.colored_label(col, label);
-                                ui.label(format!("${vol:.1}M"));
-                                ui.colored_label(if dist >= 0.0 { green } else { red }, format!("{dist:+.1}%"));
+                        egui::Grid::new("liq_heatmap_grid").striped(true).show(
+                            &mut columns[1],
+                            |ui| {
+                                ui.strong("Price Level");
+                                ui.strong("Cluster Type");
+                                ui.strong("Cascade Notional");
+                                ui.strong("Distance");
                                 ui.end_row();
-                            }
-                        });
+
+                                for b in bands {
+                                    let p = b["price_level"].as_f64().unwrap_or(0.0);
+                                    let side = b["side"].as_str().unwrap_or("");
+                                    let vol = b["volume_notional_mil"].as_f64().unwrap_or(0.0);
+                                    let dist = b["distance_pct"].as_f64().unwrap_or(0.0);
+
+                                    let (label, col) = if side == "SHORT_LIQ" {
+                                        ("🔥 SHORT SQUEEZE", red)
+                                    } else {
+                                        ("🩸 LONG FLUSH", green)
+                                    };
+
+                                    ui.label(format!("${p:.2}"));
+                                    ui.colored_label(col, label);
+                                    ui.label(format!("${vol:.1}M"));
+                                    ui.colored_label(
+                                        if dist >= 0.0 { green } else { red },
+                                        format!("{dist:+.1}%"),
+                                    );
+                                    ui.end_row();
+                                }
+                            },
+                        );
                     }
                 });
 
                 ui.add_space(12.0);
-                ui.label(egui::RichText::new(format!("CURRENT MARK PRICE: ${mark:.2}")).size(14.0).strong().color(amber));
+                ui.label(
+                    egui::RichText::new(format!("CURRENT MARK PRICE: ${mark:.2}"))
+                        .size(14.0)
+                        .strong()
+                        .color(amber),
+                );
             }
         }
     }
@@ -1867,7 +2570,10 @@ impl MoneyCraftGui {
         let red = Color32::from_rgb(255, 23, 68);
         let cyan = Color32::from_rgb(0, 229, 255);
 
-        ui.heading(egui::RichText::new("🎮 FANTASY PAPER TRADING ARENA (SPOT & 1x-50x LEVERAGED PERPS)").color(amber));
+        ui.heading(
+            egui::RichText::new("🎮 FANTASY PAPER TRADING ARENA (SPOT & 1x-50x LEVERAGED PERPS)")
+                .color(amber),
+        );
         ui.label("Risk-free sovereign paper trading sandbox with realistic margin calls and simulated execution:");
 
         ui.add_space(8.0);
@@ -1889,8 +2595,15 @@ impl MoneyCraftGui {
                 // Account Telemetry Header
                 egui::Frame::group(ui.style()).show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(format!("EQUITY: ${equity:.2}")).size(15.0).strong());
-                        ui.colored_label(if un_pnl >= 0.0 { green } else { red }, format!("(PnL: {un_pnl:+.2})"));
+                        ui.label(
+                            egui::RichText::new(format!("EQUITY: ${equity:.2}"))
+                                .size(15.0)
+                                .strong(),
+                        );
+                        ui.colored_label(
+                            if un_pnl >= 0.0 { green } else { red },
+                            format!("(PnL: {un_pnl:+.2})"),
+                        );
                         ui.separator();
                         ui.label(format!("AVAILABLE: ${avail:.2}"));
                         ui.label(format!("MARGIN USED: ${margin:.2}"));
@@ -1916,35 +2629,73 @@ impl MoneyCraftGui {
                         ui.separator();
 
                         ui.label("Side:");
-                        if ui.selectable_label(self.paper_order_side == "LONG", egui::RichText::new("🟢 LONG / BUY").color(green)).clicked() {
+                        if ui
+                            .selectable_label(
+                                self.paper_order_side == "LONG",
+                                egui::RichText::new("🟢 LONG / BUY").color(green),
+                            )
+                            .clicked()
+                        {
                             self.paper_order_side = "LONG".to_string();
                         }
-                        if ui.selectable_label(self.paper_order_side == "SHORT", egui::RichText::new("🔴 SHORT / SELL").color(red)).clicked() {
+                        if ui
+                            .selectable_label(
+                                self.paper_order_side == "SHORT",
+                                egui::RichText::new("🔴 SHORT / SELL").color(red),
+                            )
+                            .clicked()
+                        {
                             self.paper_order_side = "SHORT".to_string();
                         }
 
                         ui.separator();
                         ui.label("Type:");
-                        if ui.selectable_label(self.paper_order_type == "PERP_FUTURES", "Perp Futures").clicked() {
+                        if ui
+                            .selectable_label(
+                                self.paper_order_type == "PERP_FUTURES",
+                                "Perp Futures",
+                            )
+                            .clicked()
+                        {
                             self.paper_order_type = "PERP_FUTURES".to_string();
                         }
-                        if ui.selectable_label(self.paper_order_type == "SPOT", "Spot").clicked() {
+                        if ui
+                            .selectable_label(self.paper_order_type == "SPOT", "Spot")
+                            .clicked()
+                        {
                             self.paper_order_type = "SPOT".to_string();
                         }
                     });
 
                     ui.horizontal(|ui| {
                         ui.label("Order Size:");
-                        ui.add(egui::DragValue::new(&mut self.paper_quantity).range(0.01..=1_000_000.0).speed(0.1));
+                        ui.add(
+                            egui::DragValue::new(&mut self.paper_quantity)
+                                .range(0.01..=1_000_000.0)
+                                .speed(0.1),
+                        );
 
                         if self.paper_order_type == "PERP_FUTURES" {
                             ui.separator();
                             ui.label("Leverage Slider:");
-                            ui.add(egui::Slider::new(&mut self.paper_leverage, 1.0..=50.0).text("x Leverage"));
+                            ui.add(
+                                egui::Slider::new(&mut self.paper_leverage, 1.0..=50.0)
+                                    .text("x Leverage"),
+                            );
                         }
 
                         ui.separator();
-                        if ui.button(egui::RichText::new(format!("⚡ EXECUTE FANTASY {} ORDER", self.paper_order_side)).color(amber).strong()).clicked() {
+                        if ui
+                            .button(
+                                egui::RichText::new(format!(
+                                    "⚡ EXECUTE FANTASY {} ORDER",
+                                    self.paper_order_side
+                                ))
+                                .color(amber)
+                                .strong(),
+                            )
+                            .clicked()
+                        {
                             do_open = true;
                         }
                     });
@@ -1954,50 +2705,55 @@ impl MoneyCraftGui {
                 // Active Positions Table
                 ui.strong(egui::RichText::new("ACTIVE FANTASY POSITIONS").color(amber));
                 if let Some(positions) = acc["positions"].as_array() {
-                    egui::Grid::new("paper_positions_grid").striped(true).show(ui, |ui| {
-                        ui.strong("ID");
-                        ui.strong("Symbol");
-                        ui.strong("Side");
-                        ui.strong("Leverage");
-                        ui.strong("Size");
-                        ui.strong("Entry");
-                        ui.strong("Mark");
-                        ui.strong("Liq Price");
-                        ui.strong("Margin");
-                        ui.strong("PnL (USD / %)");
-                        ui.strong("Action");
-                        ui.end_row();
-
-                        for pos in positions {
-                            let pid = pos["id"].as_str().unwrap_or("");
-                            let sym = pos["symbol"].as_str().unwrap_or("");
-                            let side = pos["side"].as_str().unwrap_or("");
-                            let lev = pos["leverage"].as_f64().unwrap_or(1.0);
-                            let qty = pos["quantity"].as_f64().unwrap_or(0.0);
-                            let entry = pos["entry_price"].as_f64().unwrap_or(0.0);
-                            let cur = pos["current_price"].as_f64().unwrap_or(0.0);
-                            let liq = pos["liquidation_price"].as_f64().unwrap_or(0.0);
-                            let marg = pos["margin_allocated"].as_f64().unwrap_or(0.0);
-                            let pnl = pos["unrealized_pnl"].as_f64().unwrap_or(0.0);
-                            let pnl_pct = pos["unrealized_pnl_pct"].as_f64().unwrap_or(0.0);
-
-                            ui.label(pid);
-                            ui.label(sym);
-                            ui.colored_label(if side == "LONG" { green } else { red }, side);
-                            ui.label(format!("{lev:.0}x"));
-                            ui.label(format!("{qty:.2}"));
-                            ui.label(format!("{entry:.2}"));
-                            ui.label(format!("{cur:.2}"));
-                            ui.colored_label(red, format!("{liq:.2}"));
-                            ui.label(format!("${marg:.1}"));
-                            ui.colored_label(if pnl >= 0.0 { green } else { red }, format!("{pnl:+.2} ({pnl_pct:+.1}%)"));
-
-                            if ui.small_button("❌ Close").clicked() {
-                                close_id = Some(pid.to_string());
-                            }
+                    egui::Grid::new("paper_positions_grid")
+                        .striped(true)
+                        .show(ui, |ui| {
+                            ui.strong("ID");
+                            ui.strong("Symbol");
+                            ui.strong("Side");
+                            ui.strong("Leverage");
+                            ui.strong("Size");
+                            ui.strong("Entry");
+                            ui.strong("Mark");
+                            ui.strong("Liq Price");
+                            ui.strong("Margin");
+                            ui.strong("PnL (USD / %)");
+                            ui.strong("Action");
                             ui.end_row();
-                        }
-                    });
+
+                            for pos in positions {
+                                let pid = pos["id"].as_str().unwrap_or("");
+                                let sym = pos["symbol"].as_str().unwrap_or("");
+                                let side = pos["side"].as_str().unwrap_or("");
+                                let lev = pos["leverage"].as_f64().unwrap_or(1.0);
+                                let qty = pos["quantity"].as_f64().unwrap_or(0.0);
+                                let entry = pos["entry_price"].as_f64().unwrap_or(0.0);
+                                let cur = pos["current_price"].as_f64().unwrap_or(0.0);
+                                let liq = pos["liquidation_price"].as_f64().unwrap_or(0.0);
+                                let marg = pos["margin_allocated"].as_f64().unwrap_or(0.0);
+                                let pnl = pos["unrealized_pnl"].as_f64().unwrap_or(0.0);
+                                let pnl_pct = pos["unrealized_pnl_pct"].as_f64().unwrap_or(0.0);
+
+                                ui.label(pid);
+                                ui.label(sym);
+                                ui.colored_label(if side == "LONG" { green } else { red }, side);
+                                ui.label(format!("{lev:.0}x"));
+                                ui.label(format!("{qty:.2}"));
+                                ui.label(format!("{entry:.2}"));
+                                ui.label(format!("{cur:.2}"));
+                                ui.colored_label(red, format!("{liq:.2}"));
+                                ui.label(format!("${marg:.1}"));
+                                ui.colored_label(
+                                    if pnl >= 0.0 { green } else { red },
+                                    format!("{pnl:+.2} ({pnl_pct:+.1}%)"),
+                                );
+
+                                if ui.small_button("❌ Close").clicked() {
+                                    close_id = Some(pid.to_string());
+                                }
+                                ui.end_row();
+                            }
+                        });
                 }
             }
         }
@@ -2018,7 +2774,10 @@ impl MoneyCraftGui {
         let green = Color32::from_rgb(0, 230, 118);
         let cyan = Color32::from_rgb(0, 229, 255);
 
-        ui.heading(egui::RichText::new("🧠 AGENTIC AI QUANT WORKFLOWS (BLOOMBERG ASKB // BQUANT)").color(amber));
+        ui.heading(
+            egui::RichText::new("🧠 AGENTIC AI QUANT WORKFLOWS (BLOOMBERG ASKB // BQUANT)")
+                .color(amber),
+        );
         ui.label("Execute institutional generative workflows grounded in sovereign real-time market data:");
 
         ui.add_space(8.0);
@@ -2048,11 +2807,26 @@ impl MoneyCraftGui {
                 ui.colored_label(cyan, &self.selected_symbol);
             });
             ui.add_space(4.0);
-            ui.label(egui::RichText::new("Agent Prompt / Scenario Input:").monospace().color(amber));
-            ui.add(egui::TextEdit::multiline(&mut self.ai_prompt).desired_rows(3).desired_width(f32::INFINITY));
+            ui.label(
+                egui::RichText::new("Agent Prompt / Scenario Input:")
+                    .monospace()
+                    .color(amber),
+            );
+            ui.add(
+                egui::TextEdit::multiline(&mut self.ai_prompt)
+                    .desired_rows(3)
+                    .desired_width(f32::INFINITY),
+            );
 
             ui.add_space(6.0);
-            if ui.button(egui::RichText::new("⚡ Execute AI Quant Workflow").color(amber).strong()).clicked() {
+            if ui
+                .button(
+                    egui::RichText::new("⚡ Execute AI Quant Workflow")
+                        .color(amber)
+                        .strong(),
+                )
+                .clicked()
+            {
                 self.run_ai_workflow();
             }
         });
@@ -2092,7 +2866,14 @@ impl MoneyCraftGui {
                 ui.text_edit_singleline(&mut self.audit_chain);
             });
             ui.add_space(6.0);
-            if ui.button(egui::RichText::new("🔍 Audit Contract In Sandbox").color(amber).strong()).clicked() {
+            if ui
+                .button(
+                    egui::RichText::new("🔍 Audit Contract In Sandbox")
+                        .color(amber)
+                        .strong(),
+                )
+                .clicked()
+            {
                 self.run_audit();
             }
         });
@@ -2111,7 +2892,10 @@ impl MoneyCraftGui {
                         ("✅ VERIFIED CLEAN / SAFE CONTRACT", green)
                     };
 
-                    ui.colored_label(score_color, egui::RichText::new(status_text).strong().size(15.0));
+                    ui.colored_label(
+                        score_color,
+                        egui::RichText::new(status_text).strong().size(15.0),
+                    );
                     ui.label(format!("Risk Score: {score}/100"));
                     ui.label(format!("Verdict: {verdict}"));
                     ui.separator();
@@ -2119,7 +2903,10 @@ impl MoneyCraftGui {
                     ui.label(format!("Buy Tax: {}%", report["buy_tax_pct"]));
                     ui.label(format!("Sell Tax: {}%", report["sell_tax_pct"]));
                     ui.label(format!("Can Mint Tokens: {}", report["can_mint_tokens"]));
-                    ui.label(format!("Can Blacklist Wallets: {}", report["can_blacklist_wallets"]));
+                    ui.label(format!(
+                        "Can Blacklist Wallets: {}",
+                        report["can_blacklist_wallets"]
+                    ));
                     ui.label(format!("Liquidity Locked: {}", report["liquidity_locked"]));
                 });
             }
@@ -2131,7 +2918,9 @@ impl MoneyCraftGui {
         let green = Color32::from_rgb(0, 230, 118);
 
         ui.heading(egui::RichText::new("⚙️ HIGH-SPEED MONTE CARLO BACKTESTER").color(amber));
-        ui.label("Simulate quantitative strategies over multi-asset historical tick distributions:");
+        ui.label(
+            "Simulate quantitative strategies over multi-asset historical tick distributions:",
+        );
 
         ui.add_space(8.0);
         egui::Frame::group(ui.style()).show(ui, |ui| {
@@ -2141,10 +2930,21 @@ impl MoneyCraftGui {
             });
             ui.horizontal(|ui| {
                 ui.label("Initial Capital ($):");
-                ui.add(egui::DragValue::new(&mut self.initial_capital).range(1000.0..=10_000_000.0).speed(5000.0));
+                ui.add(
+                    egui::DragValue::new(&mut self.initial_capital)
+                        .range(1000.0..=10_000_000.0)
+                        .speed(5000.0),
+                );
             });
             ui.add_space(6.0);
-            if ui.button(egui::RichText::new("▶ Run 10,000-Path Simulation").color(amber).strong()).clicked() {
+            if ui
+                .button(
+                    egui::RichText::new("▶ Run 10,000-Path Simulation")
+                        .color(amber)
+                        .strong(),
+                )
+                .clicked()
+            {
                 self.run_backtest();
             }
         });
@@ -2154,13 +2954,35 @@ impl MoneyCraftGui {
             egui::Frame::group(ui.style()).show(ui, |ui| {
                 ui.strong(egui::RichText::new("SIMULATION SUMMARY").color(green));
                 ui.separator();
-                ui.label(format!("Strategy: {}", res["strategy"].as_str().unwrap_or("")));
-                ui.label(format!("Final Capital: ${:.2}", res["final_equity"].as_f64().unwrap_or(0.0)));
-                ui.label(format!("Net Profit: ${:.2} (+{:.1}%)", res["net_profit"].as_f64().unwrap_or(0.0), res["roi_percentage"].as_f64().unwrap_or(0.0)));
-                ui.label(format!("Sharpe Ratio: {:.2}", res["sharpe_ratio"].as_f64().unwrap_or(0.0)));
-                ui.label(format!("Max Drawdown: {:.1}%", res["max_drawdown_pct"].as_f64().unwrap_or(0.0)));
-                ui.label(format!("Win Rate: {:.1}%", res["win_rate"].as_f64().unwrap_or(0.0) * 100.0));
-                ui.label(format!("Total Simulated Trades: {}", res["trades_count"].as_u64().unwrap_or(0)));
+                ui.label(format!(
+                    "Strategy: {}",
+                    res["strategy"].as_str().unwrap_or("")
+                ));
+                ui.label(format!(
+                    "Final Capital: ${:.2}",
+                    res["final_equity"].as_f64().unwrap_or(0.0)
+                ));
+                ui.label(format!(
+                    "Net Profit: ${:.2} (+{:.1}%)",
+                    res["net_profit"].as_f64().unwrap_or(0.0),
+                    res["roi_percentage"].as_f64().unwrap_or(0.0)
+                ));
+                ui.label(format!(
+                    "Sharpe Ratio: {:.2}",
+                    res["sharpe_ratio"].as_f64().unwrap_or(0.0)
+                ));
+                ui.label(format!(
+                    "Max Drawdown: {:.1}%",
+                    res["max_drawdown_pct"].as_f64().unwrap_or(0.0)
+                ));
+                ui.label(format!(
+                    "Win Rate: {:.1}%",
+                    res["win_rate"].as_f64().unwrap_or(0.0) * 100.0
+                ));
+                ui.label(format!(
+                    "Total Simulated Trades: {}",
+                    res["trades_count"].as_u64().unwrap_or(0)
+                ));
             });
         }
     }
@@ -2180,48 +3002,68 @@ impl MoneyCraftGui {
                 let tax = p["estimated_tax_liability"].as_f64().unwrap_or(0.0);
 
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(format!("TOTAL EQUITY: ${total:.2}")).size(16.0).strong());
+                    ui.label(
+                        egui::RichText::new(format!("TOTAL EQUITY: ${total:.2}"))
+                            .size(16.0)
+                            .strong(),
+                    );
                     ui.colored_label(green, format!("(UNREALIZED PnL: +${un_pnl:.2})"));
-                    ui.label(egui::RichText::new(format!("EST. TAX: ${tax:.2}")).weak().monospace());
+                    ui.label(
+                        egui::RichText::new(format!("EST. TAX: ${tax:.2}"))
+                            .weak()
+                            .monospace(),
+                    );
                 });
             });
 
             ui.add_space(8.0);
             if let Some(positions) = p["positions"].as_array() {
-                egui::Grid::new("positions_grid").striped(true).min_col_width(90.0).show(ui, |ui| {
-                    ui.strong("Symbol");
-                    ui.strong("Class");
-                    ui.strong("Quantity");
-                    ui.strong("Entry");
-                    ui.strong("Current");
-                    ui.strong("PnL (USD)");
-                    ui.end_row();
-
-                    for pos in positions {
-                        let sym = pos["symbol"].as_str().unwrap_or("");
-                        let cls = pos["asset_class"].as_str().unwrap_or("");
-                        let qty = pos["qty"].as_f64().unwrap_or(0.0);
-                        let entry = pos["entry_price"].as_f64().unwrap_or(0.0);
-                        let cur = pos["current_price"].as_f64().unwrap_or(0.0);
-                        let pnl = pos["pnl_usd"].as_f64().unwrap_or(0.0);
-
-                        ui.label(sym);
-                        ui.label(cls);
-                        ui.label(format!("{qty:.2}"));
-                        ui.label(format!("{entry:.4}"));
-                        ui.label(format!("{cur:.4}"));
-                        ui.colored_label(if pnl >= 0.0 { green } else { Color32::RED }, format!("{pnl:+.2}"));
+                egui::Grid::new("positions_grid")
+                    .striped(true)
+                    .min_col_width(90.0)
+                    .show(ui, |ui| {
+                        ui.strong("Symbol");
+                        ui.strong("Class");
+                        ui.strong("Quantity");
+                        ui.strong("Entry");
+                        ui.strong("Current");
+                        ui.strong("PnL (USD)");
                         ui.end_row();
-                    }
-                });
+
+                        for pos in positions {
+                            let sym = pos["symbol"].as_str().unwrap_or("");
+                            let cls = pos["asset_class"].as_str().unwrap_or("");
+                            let qty = pos["qty"].as_f64().unwrap_or(0.0);
+                            let entry = pos["entry_price"].as_f64().unwrap_or(0.0);
+                            let cur = pos["current_price"].as_f64().unwrap_or(0.0);
+                            let pnl = pos["pnl_usd"].as_f64().unwrap_or(0.0);
+
+                            ui.label(sym);
+                            ui.label(cls);
+                            ui.label(format!("{qty:.2}"));
+                            ui.label(format!("{entry:.4}"));
+                            ui.label(format!("{cur:.4}"));
+                            ui.colored_label(
+                                if pnl >= 0.0 { green } else { Color32::RED },
+                                format!("{pnl:+.2}"),
+                            );
+                            ui.end_row();
+                        }
+                    });
             }
         }
     }
 }
 
 fn main() -> Result<(), eframe::Error> {
-    let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
-    let store = DatabaseStore::open_in_memory().expect("Failed to initialize sovereign SQLite store");
+    let rt = tokio::runtime::Runtime::new().unwrap_or_else(|e| {
+        eprintln!("Failed to create Tokio runtime: {e}");
+        std::process::exit(1);
+    });
+    let store = DatabaseStore::open_in_memory().unwrap_or_else(|e| {
+        eprintln!("Failed to initialize local SQLite store: {e}");
+        std::process::exit(1);
+    });
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
