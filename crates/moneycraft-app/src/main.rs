@@ -35,6 +35,7 @@ pub enum ActiveWorkspace {
     HoneypotAuditor,
     Backtester,
     PortfolioLedger,
+    Help,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,6 +67,60 @@ pub enum AiWorkflowMode {
     ExecutionRouter,
 }
 
+// ---------------------------------------------------------------------------
+// Theme-aware Bloomberg palette.
+//
+// The classic Bloomberg hues (amber/orange, jade green, cyan, gold, purple)
+// are unreadable on a white light-theme background, so light mode gets
+// darker variants of the same hues. Dark mode keeps the original neon values.
+// Bear-red passes on both and stays constant. Chart canvases are always dark,
+// so the darker variants stay legible there too. No grey text: secondary text
+// uses the theme's own weak_text_color().
+// ---------------------------------------------------------------------------
+pub fn theme_amber(ui: &egui::Ui) -> Color32 {
+    if ui.visuals().dark_mode {
+        Color32::from_rgb(255, 179, 0) // Classic Bloomberg Orange
+    } else {
+        Color32::from_rgb(155, 88, 0) // Dark amber, readable on white
+    }
+}
+
+pub fn theme_green(ui: &egui::Ui) -> Color32 {
+    if ui.visuals().dark_mode {
+        Color32::from_rgb(0, 230, 118) // Jade Bull Green
+    } else {
+        Color32::from_rgb(0, 120, 52) // Deep bull green, readable on white
+    }
+}
+
+pub fn theme_red() -> Color32 {
+    Color32::from_rgb(225, 25, 60) // Crimson Bear Red, passes on both themes
+}
+
+pub fn theme_cyan(ui: &egui::Ui) -> Color32 {
+    if ui.visuals().dark_mode {
+        Color32::from_rgb(0, 229, 255)
+    } else {
+        Color32::from_rgb(0, 110, 140) // Deep cyan, readable on white
+    }
+}
+
+pub fn theme_gold(ui: &egui::Ui) -> Color32 {
+    if ui.visuals().dark_mode {
+        Color32::from_rgb(255, 214, 0)
+    } else {
+        Color32::from_rgb(145, 100, 0) // Dark gold, readable on white
+    }
+}
+
+pub fn theme_purple(ui: &egui::Ui) -> Color32 {
+    if ui.visuals().dark_mode {
+        Color32::from_rgb(179, 136, 255)
+    } else {
+        Color32::from_rgb(103, 55, 170) // Deep purple, readable on white
+    }
+}
+
 pub struct MoneyCraftGui {
     pub store: Arc<DatabaseStore>,
     pub runtime: Arc<Runtime>,
@@ -91,6 +146,9 @@ pub struct MoneyCraftGui {
     pub chart_style: ChartStyle,
     pub date_preset: DateRangePreset,
     pub custom_bar_count: usize,
+    /// Local wheel-zoom window: show last N of the loaded bars (None = all).
+    /// Pure view state — never triggers a refetch; reset on symbol/source/range change.
+    pub chart_zoom_bars: Option<usize>,
     pub show_sma20: bool,
     pub show_ema50: bool,
     pub show_bollinger: bool,
@@ -176,6 +234,7 @@ impl MoneyCraftGui {
             chart_style: ChartStyle::Candlestick,
             date_preset: DateRangePreset::Month1,
             custom_bar_count: 60,
+            chart_zoom_bars: None,
             show_sma20: true,
             show_ema50: true,
             show_bollinger: true,
@@ -232,6 +291,8 @@ impl MoneyCraftGui {
     }
 
     pub fn fetch_market_feed(&mut self) {
+        // New data → zoom window resets (it is a view over the loaded bars).
+        self.chart_zoom_bars = None;
         let sym = self.selected_symbol.clone();
         let bars = self.custom_bar_count;
         let src = self.active_data_source.clone();
@@ -431,9 +492,9 @@ impl eframe::App for MoneyCraftGui {
             ui.ctx().set_visuals(egui::Visuals::light());
         }
 
-        let amber = Color32::from_rgb(255, 179, 0); // Classic Bloomberg Orange
-        let green = Color32::from_rgb(0, 230, 118); // Jade Bull Green
-        let red = Color32::from_rgb(255, 23, 68); // Crimson Bear Red
+        let amber = theme_amber(ui); // Classic Bloomberg Orange
+        let green = theme_green(ui); // Jade Bull Green
+        let red = theme_red(); // Crimson Bear Red
 
         // 0. Desktop Menu Bar
         egui::Panel::top("desktop_menu_bar").show(ui, |ui| {
@@ -546,6 +607,10 @@ impl eframe::App for MoneyCraftGui {
                 });
 
                 ui.menu_button("Help", |ui| {
+                    if ui.button("📖 Operator Manual").clicked() {
+                        self.active_workspace = ActiveWorkspace::Help;
+                        ui.close();
+                    }
                     if ui.button("About MoneyCraft Bloomberg Terminal").clicked() {
                         self.show_about_dialog = true;
                         ui.close();
@@ -776,10 +841,13 @@ impl eframe::App for MoneyCraftGui {
                 if nav_btn(ui, self.active_workspace == ActiveWorkspace::Backtester, t(I18nKey::NavBacktester, loc)) {
                     self.active_workspace = ActiveWorkspace::Backtester;
                 }
-                if nav_btn(ui, self.active_workspace == ActiveWorkspace::PortfolioLedger, t(I18nKey::NavPortfolioLedger, loc)) {
-                    self.active_workspace = ActiveWorkspace::PortfolioLedger;
-                    self.fetch_portfolio();
-                }
+            if nav_btn(ui, self.active_workspace == ActiveWorkspace::PortfolioLedger, t(I18nKey::NavPortfolioLedger, loc)) {
+                self.active_workspace = ActiveWorkspace::PortfolioLedger;
+                self.fetch_portfolio();
+            }
+            if nav_btn(ui, self.active_workspace == ActiveWorkspace::Help, t(I18nKey::NavHelp, loc)) {
+                self.active_workspace = ActiveWorkspace::Help;
+            }
             });
 
             egui::CollapsingHeader::new("GLOBAL INDICES — Yahoo 15m delayed")
@@ -949,6 +1017,7 @@ impl eframe::App for MoneyCraftGui {
             ActiveWorkspace::HoneypotAuditor => self.render_honeypot_auditor(ui),
             ActiveWorkspace::Backtester => self.render_backtester(ui),
             ActiveWorkspace::PortfolioLedger => self.render_portfolio_ledger(ui),
+            ActiveWorkspace::Help => self.render_help(ui),
         });
 
         // Modals
@@ -1008,10 +1077,10 @@ impl eframe::App for MoneyCraftGui {
 
 impl MoneyCraftGui {
     fn render_personal_wealth(&mut self, ui: &mut egui::Ui) {
-        let amber = Color32::from_rgb(255, 179, 0);
-        let green = Color32::from_rgb(0, 230, 118);
-        let red = Color32::from_rgb(255, 23, 68);
-        let cyan = Color32::from_rgb(0, 229, 255);
+        let amber = theme_amber(ui);
+        let green = theme_green(ui);
+        let red = theme_red();
+        let cyan = theme_cyan(ui);
 
         ui.heading(
             egui::RichText::new("💶 PERSONAL WEALTH, SAVINGS & INFLATION EROSION SIMULATOR")
@@ -1222,7 +1291,10 @@ impl MoneyCraftGui {
             // 3. The Shocking Truth Callout Box
             if net_real_yield < 0.0 {
                 ui.add_space(4.0);
-                egui::Frame::group(ui.style()).fill(Color32::from_rgb(32, 12, 16)).show(ui, |ui| {
+                egui::Frame::group(ui.style())
+                    .fill(ui.visuals().faint_bg_color)
+                    .stroke(egui::Stroke::new(1.5, theme_red()))
+                    .show(ui, |ui| {
                     ui.colored_label(red, egui::RichText::new(format!("⚠️ INFLATION WARNING: Your capital is losing purchasing power at {net_real_yield:.2}% per year.")).strong());
                     ui.label(format!("At this run-rate, your money's real purchasing power will be cut in half in {halve_years:.1} years (Rule of 72)."));
                     ui.label("Your 3% Festgeld sounds safe, but inflation (3.8%) means you are guaranteed to end up poorer in real terms.");
@@ -1312,11 +1384,140 @@ impl MoneyCraftGui {
         }
     }
 
+    fn render_help(&mut self, ui: &mut egui::Ui) {
+        let amber = theme_amber(ui);
+        let green = theme_green(ui);
+        let red = theme_red();
+
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.heading(
+                egui::RichText::new("📖 MONEYCRAFT OPERATOR MANUAL").color(amber),
+            );
+            ui.label(
+                "Every function in this terminal, in one place. Pick a section below — each opens with the controls it documents.",
+            );
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                if ui.button("📊 Terminal").clicked() {
+                    self.active_workspace = ActiveWorkspace::Terminal;
+                    self.fetch_market_feed();
+                }
+                if ui.button("📡 Data Sources").clicked() {
+                    self.active_workspace = ActiveWorkspace::DataSources;
+                }
+                if ui.button("💶 Wealth Sim").clicked() {
+                    self.active_workspace = ActiveWorkspace::PersonalWealth;
+                    self.run_wealth_simulation();
+                }
+                if ui.button("🎮 Paper Trading").clicked() {
+                    self.active_workspace = ActiveWorkspace::FantasyTrading;
+                    self.fetch_paper_account();
+                }
+            });
+            ui.add_space(8.0);
+
+            egui::CollapsingHeader::new("🖥️ Getting around")
+                .default_open(true)
+                .show(ui, |ui| {
+                    ui.label("• Sidebar (left): every section is collapsible — collapse what you don't use so the rail never becomes a hundred-item scroll.");
+                    ui.label("• Top menu bar: File (sync ledger, refresh feed, exit), Personal Wealth, Global Indices, Stocks, Forex Desk, Crypto & Perps, AI Workflows, Help.");
+                    ui.label("• Top-right: Light/Dark theme switch, login state, interface language (EN/DE/FR/ES/JA/KO/ZH).");
+                    ui.label("• News wire: the breaking-news ticker under the top bar cycles headlines — ▶ Next Wire skips ahead. Sentiment tags (BULLISH/BEARISH) color the wire.");
+                    ui.label("• Status line (bottom): shows the active feed, last update note, and bar count for the current symbol.");
+                });
+
+            egui::CollapsingHeader::new("📊 Terminal chart — reading it")
+                .default_open(true)
+                .show(ui, |ui| {
+                    ui.label("• FEED SOURCE dropdown: which pipe fills the chart. Yahoo = 15-min delayed exchange data (free). Binance/Hyperliquid = live crypto (free, 0s). ECB = daily central-bank fixing. Synthetic = offline random-walk for airplane mode.");
+                    ui.label("• RANGE presets (1D … ALL-TIME 1720): each preset loads that many bars and refetches. Historic presets (1850/1720) switch to synthetic archive series.");
+                    ui.label("• STYLE: Candlestick (green bull / red bear bodies + wicks), Mountain Area (close-line with fill), Heikin-Ashi (trend-averaged candles).");
+                    ui.label("• OVERLAYS: SMA20 (cyan trend), EMA50 (gold trend), BBands (purple volatility envelope), Vol (volume bars + aggression tint), RSI (14-period momentum sub-panel, 70/30 bands).");
+                    ui.label("• 🚩 Panics: crimson year markers for 1720/1825/1847/1857/1866/1873/1929/1987/2008/2020. Hover a marker for the crisis card (cause, drop, lesson).");
+                    ui.label("• Hover the chart: crosshair + HUD card shows bar index, O/H/L/C and volume at the cursor.");
+                    ui.colored_label(green, "• Wheel zoom: roll the mouse wheel over the chart to zoom into the last N bars. Pure view operation — no refetch, overlays stay aligned, price scale rescales. Zoom out fully (or change symbol, source or range) to reset.");
+                });
+
+            egui::CollapsingHeader::new("🔍 Picking symbols — indices, stocks, forex")
+                .default_open(true)
+                .show(ui, |ui| {
+                    ui.label("• GLOBAL INDICES: 10 one-click benchmarks — DJIA, SPX, NDX, DAX, N225, KOSPI, FTSE, HSI, STOXX50, CAC40.");
+                    ui.label("• STOCKS: 15 quick picks (AAPL, MSFT, NVDA, AMZN, META, TSLA, GOOGL, AMD, NFLX, JPM, XOM, JNJ, SAP.DE, ASML, SPY). Any other Yahoo ticker works too — type it in the custom field and press Load (e.g. SIE.DE, AIR.PA, NESN.SW).");
+                    ui.label("• FOREX DESK: direction matters — EUR/USD and USD/EUR are different pairs with inverse prices. Pick FROM and TO out of the 20 majors, press ⇄ to swap, Load to chart. Quick pairs cover the 15 most-traded crosses.");
+                    ui.label("• 20 majors: USD EUR JPY GBP CHF CAD AUD NZD CNY HKD SGD SEK NOK DKK MXN ZAR KRW INR BRL PLN.");
+                    ui.colored_label(red, "• Delayed data only (Yahoo 15 min, ECB daily). Nothing here is a live quote or investment advice.");
+                });
+
+            egui::CollapsingHeader::new("📡 Data sources & the payola matrix")
+                .default_open(false)
+                .show(ui, |ui| {
+                    ui.label("• Synthetic Offline: local random-walk, 0ms, $0. For backtests and offline use.");
+                    ui.label("• Binance / Hyperliquid: live crypto klines and perp mark prices, $0, no key. The only real-time pipes in the building.");
+                    ui.label("• Yahoo Finance: 10 indices + 15 stocks + any forex cross + gold + BTC/ETH/SOL, 15-min delayed, $0, no key. The default.");
+                    ui.label("• ECB EuroFX: official daily reference rates (~14:15 CET), any cross computed via EUR, $0.");
+                    ui.label("• TwelveData / Finnhub, IBKR Gateway, Polygon.io, Bloomberg B-PIPE: payola tiers — real-time exchange data costs money because exchanges own the quotes. IBKR passes through raw exchange fees (~$1.50/mo); Bloomberg charges ~$2.5k/mo per seat.");
+                    if ui.button("Open the full payola matrix").clicked() {
+                        self.active_workspace = ActiveWorkspace::DataSources;
+                    }
+                });
+
+            egui::CollapsingHeader::new("📈 Multi-asset compare")
+                .default_open(false)
+                .show(ui, |ui| {
+                    ui.label("• Overlays normalized % returns ((price − first) / first × 100) for the comparison basket so DJIA and SOL can share one chart.");
+                    ui.label("• Legend chips (● symbol, colored) remove/add a series. Date ranges and feed source apply to the whole basket.");
+                    ui.label("• 0.0% BASE line = basket start. Divergence from it is relative performance, not price.");
+                });
+
+            egui::CollapsingHeader::new("🔥 Crypto derivatives desk")
+                .default_open(false)
+                .show(ui, |ui| {
+                    ui.label("• Funding table: 8h and annualized rates per venue (Hyperliquid, Binance, Bybit, OKX) plus open interest. The arb spread row = best long venue vs best short venue.");
+                    ui.label("• Liquidation heatmap: notional stacked above (SHORT_LIQ) and below (LONG_LIQ) mark price — where forced sellers/buyers cluster.");
+                    ui.label("• Only meaningful for BTC/ETH/SOL. For TradFi symbols it mirrors the spot price.");
+                });
+
+            egui::CollapsingHeader::new("🎮 Fantasy paper trading")
+                .default_open(false)
+                .show(ui, |ui| {
+                    ui.label("• LONG/SHORT, SPOT or PERP_FUTURES, quantity, 1x–50x leverage. Fill price = current chart price unless overridden.");
+                    ui.label("• Liquidation price is computed from entry and leverage (≈ 90% adverse move ÷ leverage). Unrealized PnL updates against the live feed.");
+                    ui.label("• Reset Account restores the €100,000 fantasy balance. Sandbox only — no orders ever leave this machine.");
+                });
+
+            egui::CollapsingHeader::new("🧠 AI workflows (4 modes)")
+                .default_open(false)
+                .show(ui, |ui| {
+                    ui.label("• STRATEGY_GEN: drafts a momentum + Bollinger mean-reversion ruleset for the current symbol.");
+                    ui.label("• STRESS_TEST: runs the 10,000-path Monte Carlo macro shock suite (rate shock, liquidity freeze, FX deval).");
+                    ui.label("• SENTIMENT_ALPHA: scores the news wire for the active symbol and tilts the signal.");
+                    ui.label("• EXECUTION_ROUTER: picks venue/order slicing for a hypothetical fill (venue logic only — executes nothing).");
+                    ui.label("• Prompt box is free text; Target Asset defaults to the chart symbol. Results render as JSON in the panel.");
+                });
+
+            egui::CollapsingHeader::new("🛡️ Honeypot auditor, ⚙️ backtester, 💼 ledger")
+                .default_open(false)
+                .show(ui, |ui| {
+                    ui.label("• Auditor: paste a contract address + chain — flags honeypot/drainer patterns (transfer locks, mint traps, blacklist) with a 0–100 risk score. Read-only scan, never touches a wallet.");
+                    ui.label("• Backtester: strategy name + symbol + starting capital → 10,000-path Monte Carlo report (median/percentiles, max drawdown). Synthetic paths, not a fill guarantee.");
+                    ui.label("• Portfolio ledger: equity, available balance, margin used, win/loss counts, open positions table, estimated tax line. Reset restores the fantasy account.");
+                });
+
+            egui::CollapsingHeader::new("⌨️ Mouse & honesty notes")
+                .default_open(false)
+                .show(ui, |ui| {
+                    ui.label("• Mouse: wheel over chart = zoom · hover = crosshair + OHLC HUD · hover a 🚩 marker = crisis card · click legend chips = toggle series.");
+                    ui.label("• No grey-on-white anywhere by design; if you find unreadable text in either theme, report the panel and it gets fixed like the last three.");
+                    ui.colored_label(red, "• Honesty rules: delayed data is labeled delayed; offline/synthetic series are labeled synthetic; missing keys or fixtures produce a refusal, never a faked number.");
+                });
+        });
+    }
+
     fn render_data_sources_and_payola(&mut self, ui: &mut egui::Ui) {
-        let amber = Color32::from_rgb(255, 179, 0);
-        let green = Color32::from_rgb(0, 230, 118);
-        let cyan = Color32::from_rgb(0, 229, 255);
-        let purple = Color32::from_rgb(179, 136, 255);
+        let amber = theme_amber(ui);
+        let green = theme_green(ui);
+        let cyan = theme_cyan(ui);
+        let purple = theme_purple(ui);
 
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.heading(egui::RichText::new("📡 MARKET DATA FEEDS, DELAY AUDITING & EXCHANGE PAYOLA MATRIX").color(amber));
@@ -1351,11 +1552,15 @@ impl MoneyCraftGui {
                 let mut col_count = 0;
                 for s in sources {
                     let is_active = self.active_data_source.eq_ignore_ascii_case(&s.id);
-                    let border_color = if is_active { green } else { Color32::from_rgb(45, 55, 72) };
+                    let border_color = if is_active {
+                        green
+                    } else {
+                        ui.visuals().widgets.noninteractive.bg_stroke.color
+                    };
 
                     egui::Frame::group(ui.style())
                         .stroke(Stroke::new(if is_active { 2.0 } else { 1.0 }, border_color))
-                        .fill(if is_active { Color32::from_rgb(10, 24, 18) } else { Color32::from_rgb(14, 18, 26) })
+                        .fill(ui.visuals().faint_bg_color)
                         .show(ui, |ui| {
                             ui.set_width(280.0);
                             ui.set_height(260.0);
@@ -1410,7 +1615,9 @@ impl MoneyCraftGui {
 
             ui.add_space(16.0);
             // 3. Deep Dive Educational Guide on Exchange Payola
-            egui::Frame::group(ui.style()).fill(Color32::from_rgb(12, 16, 24)).show(ui, |ui| {
+            egui::Frame::group(ui.style())
+                .fill(ui.visuals().faint_bg_color)
+                .show(ui, |ui| {
                 ui.strong(egui::RichText::new("📖 THE EXCHANGE DATA MONOPOLY EXPLAINED (WHY MARKET DATA COSTS MONEY)").color(cyan).size(15.0));
                 ui.add_space(6.0);
 
@@ -1433,12 +1640,12 @@ impl MoneyCraftGui {
     }
 
     fn render_bloomberg_terminal(&mut self, ui: &mut egui::Ui) {
-        let amber = Color32::from_rgb(255, 179, 0);
-        let green = Color32::from_rgb(0, 230, 118);
-        let red = Color32::from_rgb(255, 23, 68);
-        let cyan = Color32::from_rgb(0, 229, 255);
-        let gold = Color32::from_rgb(255, 214, 0);
-        let purple = Color32::from_rgb(179, 136, 255);
+        let amber = theme_amber(ui);
+        let green = theme_green(ui);
+        let red = theme_red();
+        let cyan = theme_cyan(ui);
+        let gold = theme_gold(ui);
+        let purple = theme_purple(ui);
 
         // Top Toolbar: Data Feed Source Selector & Real/Delayed Status
         ui.horizontal(|ui| {
@@ -1697,6 +1904,14 @@ impl MoneyCraftGui {
                 &mut self.show_historic_panics,
                 egui::RichText::new("🚩 Panics").color(red),
             );
+            ui.separator();
+            if self.chart_zoom_bars.is_some() {
+                ui.label(
+                    egui::RichText::new("🔍 zoomed — wheel out or change range to reset").small(),
+                );
+            } else {
+                ui.label(egui::RichText::new("wheel on chart = zoom").small().weak());
+            }
         });
         ui.separator();
 
@@ -1708,6 +1923,37 @@ impl MoneyCraftGui {
             egui::Sense::hover(),
         );
         let rect = response.rect;
+
+        // Mouse-wheel zoom: local view window over the already-loaded bars.
+        // Plain wheel zooms (the terminal chart is NOT inside a ScrollArea,
+        // so nothing else competes for the gesture). No refetch — zoom only
+        // slices the loaded series; changing symbol/source/range resets it.
+        let loaded_bars = self
+            .market_data
+            .as_ref()
+            .and_then(|m| m.get("candles"))
+            .and_then(|c| c.as_array())
+            .map_or(0, |a| a.len());
+        if response.hovered() && loaded_bars > 10 {
+            let wheel = ui.input(|i| i.smooth_scroll_delta.y);
+            if wheel != 0.0 {
+                let cur = self
+                    .chart_zoom_bars
+                    .unwrap_or(loaded_bars)
+                    .clamp(10, loaded_bars);
+                let step = (cur / 8).max(2);
+                let next = if wheel > 0.0 {
+                    cur.saturating_sub(step).max(10)
+                } else {
+                    (cur + step).min(loaded_bars)
+                };
+                self.chart_zoom_bars = if next >= loaded_bars {
+                    None
+                } else {
+                    Some(next)
+                };
+            }
+        }
 
         // Black Obsidian Canvas Background
         painter.rect_filled(rect, 4.0, Color32::from_rgb(6, 8, 12));
@@ -1737,6 +1983,15 @@ impl MoneyCraftGui {
         if n == 0 {
             return;
         }
+
+        // Zoom window: render the last `view_n` of the `n` loaded bars.
+        // Every data loop below iterates the full arrays with `.skip(skip)`
+        // and maps through `to_x(view_idx)`, so SMA/EMA/BB/RSI/volume stay
+        // aligned with the candles. Price auto-scale also uses the view.
+        let view_lo = 10.min(n);
+        let view_n = self.chart_zoom_bars.unwrap_or(n).clamp(view_lo, n);
+        let skip = n.saturating_sub(view_n);
+        let n = view_n;
 
         // Sub-panel boundaries
         let margin_left = 60.0;
@@ -1771,7 +2026,7 @@ impl MoneyCraftGui {
         let mut max_price = f64::MIN;
         let mut max_vol = 0.0;
 
-        for c in candles {
+        for c in candles.iter().skip(skip) {
             let h = c["high"].as_f64().unwrap_or(1.0);
             let l = c["low"].as_f64().unwrap_or(1.0);
             let v = c["volume"].as_f64().unwrap_or(0.0);
@@ -1847,8 +2102,8 @@ impl MoneyCraftGui {
                     let mut points_lower = Vec::new();
                     for idx in 0..n {
                         if let (Some(u), Some(l)) = (
-                            u_arr.get(idx).and_then(|v| v.as_f64()),
-                            l_arr.get(idx).and_then(|v| v.as_f64()),
+                            u_arr.get(skip + idx).and_then(|v| v.as_f64()),
+                            l_arr.get(skip + idx).and_then(|v| v.as_f64()),
                         ) {
                             let x = to_x(idx);
                             points_upper.push(Pos2::new(x, to_y(u)));
@@ -1891,7 +2146,7 @@ impl MoneyCraftGui {
 
         if self.chart_style == ChartStyle::MountainArea {
             let mut line_points = Vec::with_capacity(n);
-            for (idx, c) in candles.iter().enumerate() {
+            for (idx, c) in candles.iter().skip(skip).enumerate() {
                 let close = c["close"].as_f64().unwrap_or(0.0);
                 line_points.push(Pos2::new(to_x(idx), to_y(close)));
             }
@@ -1911,7 +2166,7 @@ impl MoneyCraftGui {
             }
         } else {
             // Candlesticks (Standard or Heikin-Ashi)
-            for (idx, c) in candles.iter().enumerate() {
+            for (idx, c) in candles.iter().skip(skip).enumerate() {
                 let x = to_x(idx);
                 let open = c["open"].as_f64().unwrap_or(0.0);
                 let high = c["high"].as_f64().unwrap_or(0.0);
@@ -1952,7 +2207,7 @@ impl MoneyCraftGui {
             if let Some(inds) = mkt.get("indicators") {
                 if let Some(arr) = inds["sma_20"].as_array() {
                     let mut prev = None;
-                    for (idx, v) in arr.iter().enumerate() {
+                    for (idx, v) in arr.iter().skip(skip).enumerate() {
                         if let Some(val) = v.as_f64() {
                             let curr = Pos2::new(to_x(idx), to_y(val));
                             if let Some(p) = prev {
@@ -1970,7 +2225,7 @@ impl MoneyCraftGui {
             if let Some(inds) = mkt.get("indicators") {
                 if let Some(arr) = inds["ema_50"].as_array() {
                     let mut prev = None;
-                    for (idx, v) in arr.iter().enumerate() {
+                    for (idx, v) in arr.iter().skip(skip).enumerate() {
                         if let Some(val) = v.as_f64() {
                             let curr = Pos2::new(to_x(idx), to_y(val));
                             if let Some(p) = prev {
@@ -2001,7 +2256,7 @@ impl MoneyCraftGui {
             );
 
             let safe_max_vol = max_vol.max(1.0);
-            for (idx, c) in candles.iter().enumerate() {
+            for (idx, c) in candles.iter().skip(skip).enumerate() {
                 let x = to_x(idx);
                 let v = c["volume"].as_f64().unwrap_or(0.0);
                 let open = c["open"].as_f64().unwrap_or(0.0);
@@ -2147,7 +2402,7 @@ impl MoneyCraftGui {
             if let Some(inds) = mkt.get("indicators") {
                 if let Some(arr) = inds["rsi_14"].as_array() {
                     let mut prev = None;
-                    for (idx, v) in arr.iter().enumerate() {
+                    for (idx, v) in arr.iter().skip(skip).enumerate() {
                         if let Some(val) = v.as_f64() {
                             let curr = Pos2::new(to_x(idx), rsi_to_y(val));
                             if let Some(p) = prev {
@@ -2191,7 +2446,7 @@ impl MoneyCraftGui {
                 }
 
                 // Floating HUD Tooltip Card
-                if let Some(c) = candles.get(bar_idx) {
+                if let Some(c) = candles.get(skip + bar_idx) {
                     let o = c["open"].as_f64().unwrap_or(0.0);
                     let h = c["high"].as_f64().unwrap_or(0.0);
                     let l = c["low"].as_f64().unwrap_or(0.0);
@@ -2230,15 +2485,19 @@ impl MoneyCraftGui {
     }
 
     fn render_multi_comparison(&mut self, ui: &mut egui::Ui) {
-        let amber = Color32::from_rgb(255, 179, 0);
-        let colors = [
-            Color32::from_rgb(0, 229, 255),   // Cyan
-            Color32::from_rgb(255, 214, 0),   // Gold
-            Color32::from_rgb(0, 230, 118),   // Jade
-            Color32::from_rgb(255, 23, 68),   // Crimson
-            Color32::from_rgb(179, 136, 255), // Purple
-            Color32::from_rgb(255, 128, 0),   // Orange
-        ];
+        let amber = theme_amber(ui);
+        let cyan = theme_cyan(ui);
+        let gold = theme_gold(ui);
+        let green = theme_green(ui);
+        let red = theme_red();
+        let purple = theme_purple(ui);
+        // Deep orange for the 6th series: readable on white and dark canvas.
+        let orange = if ui.visuals().dark_mode {
+            Color32::from_rgb(255, 128, 0)
+        } else {
+            Color32::from_rgb(190, 78, 0)
+        };
+        let colors = [cyan, gold, green, red, purple, orange];
 
         ui.heading(
             egui::RichText::new("📈 MULTI-ASSET NORMALIZED COMPARISON OVERLAYS").color(amber),
@@ -2450,10 +2709,10 @@ impl MoneyCraftGui {
     }
 
     fn render_crypto_derivatives(&mut self, ui: &mut egui::Ui) {
-        let amber = Color32::from_rgb(255, 179, 0);
-        let green = Color32::from_rgb(0, 230, 118);
-        let red = Color32::from_rgb(255, 23, 68);
-        let cyan = Color32::from_rgb(0, 229, 255);
+        let amber = theme_amber(ui);
+        let green = theme_green(ui);
+        let red = theme_red();
+        let cyan = theme_cyan(ui);
 
         ui.heading(
             egui::RichText::new("🔥 CRYPTO PERPETUAL FUTURES & LIQUIDATION HEATMAP").color(amber),
@@ -2579,10 +2838,10 @@ impl MoneyCraftGui {
     }
 
     fn render_fantasy_trading(&mut self, ui: &mut egui::Ui) {
-        let amber = Color32::from_rgb(255, 179, 0);
-        let green = Color32::from_rgb(0, 230, 118);
-        let red = Color32::from_rgb(255, 23, 68);
-        let cyan = Color32::from_rgb(0, 229, 255);
+        let amber = theme_amber(ui);
+        let green = theme_green(ui);
+        let red = theme_red();
+        let cyan = theme_cyan(ui);
 
         ui.heading(
             egui::RichText::new("🎮 FANTASY PAPER TRADING ARENA (SPOT & 1x-50x LEVERAGED PERPS)")
@@ -2784,9 +3043,9 @@ impl MoneyCraftGui {
     }
 
     fn render_ai_workflows(&mut self, ui: &mut egui::Ui) {
-        let amber = Color32::from_rgb(255, 179, 0);
-        let green = Color32::from_rgb(0, 230, 118);
-        let cyan = Color32::from_rgb(0, 229, 255);
+        let amber = theme_amber(ui);
+        let green = theme_green(ui);
+        let cyan = theme_cyan(ui);
 
         ui.heading(
             egui::RichText::new("🧠 AGENTIC AI QUANT WORKFLOWS (BLOOMBERG ASKB // BQUANT)")
@@ -2862,9 +3121,9 @@ impl MoneyCraftGui {
     }
 
     fn render_honeypot_auditor(&mut self, ui: &mut egui::Ui) {
-        let amber = Color32::from_rgb(255, 179, 0);
-        let green = Color32::from_rgb(0, 230, 118);
-        let red = Color32::from_rgb(255, 23, 68);
+        let amber = theme_amber(ui);
+        let green = theme_green(ui);
+        let red = theme_red();
 
         ui.heading(egui::RichText::new("🛡️ EVM SMART CONTRACT HONEYPOT AUDITOR").color(amber));
         ui.label("Detect hidden transfer taxes, blacklist privileges, and malicious proxy traps:");
@@ -2928,8 +3187,8 @@ impl MoneyCraftGui {
     }
 
     fn render_backtester(&mut self, ui: &mut egui::Ui) {
-        let amber = Color32::from_rgb(255, 179, 0);
-        let green = Color32::from_rgb(0, 230, 118);
+        let amber = theme_amber(ui);
+        let green = theme_green(ui);
 
         ui.heading(egui::RichText::new("⚙️ HIGH-SPEED MONTE CARLO BACKTESTER").color(amber));
         ui.label(
@@ -3002,8 +3261,8 @@ impl MoneyCraftGui {
     }
 
     fn render_portfolio_ledger(&mut self, ui: &mut egui::Ui) {
-        let amber = Color32::from_rgb(255, 179, 0);
-        let green = Color32::from_rgb(0, 230, 118);
+        let amber = theme_amber(ui);
+        let green = theme_green(ui);
 
         ui.heading(egui::RichText::new("💼 SOVEREIGN PORTFOLIO LEDGER").color(amber));
         ui.label("Zero-leakage local balance sheet with real-time unrealized PnL & tax estimates:");

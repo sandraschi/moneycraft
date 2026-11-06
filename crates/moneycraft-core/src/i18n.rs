@@ -86,6 +86,7 @@ pub enum I18nKey {
     NavHoneypotAuditor,
     NavBacktester,
     NavPortfolioLedger,
+    NavHelp,
 
     // Personal Wealth & Inflation
     WealthTitle,
@@ -202,6 +203,13 @@ pub fn t(key: I18nKey, locale: AppLocale) -> &'static str {
         (I18nKey::NavPortfolioLedger, AppLocale::Ja) => "💼 ソブリン・ポートフォリオ",
         (I18nKey::NavPortfolioLedger, AppLocale::Ko) => "💼 프라이빗 포트폴리오",
         (I18nKey::NavPortfolioLedger, AppLocale::Zh) => "💼 个人私密投资组合",
+        (I18nKey::NavHelp, AppLocale::En) => "❓ Help & Manual",
+        (I18nKey::NavHelp, AppLocale::De) => "❓ Hilfe & Handbuch",
+        (I18nKey::NavHelp, AppLocale::Fr) => "❓ Aide & Manuel",
+        (I18nKey::NavHelp, AppLocale::Es) => "❓ Ayuda y manual",
+        (I18nKey::NavHelp, AppLocale::Ja) => "❓ ヘルプ＆マニュアル",
+        (I18nKey::NavHelp, AppLocale::Ko) => "❓ 도움말 및 설명서",
+        (I18nKey::NavHelp, AppLocale::Zh) => "❓ 帮助与手册",
 
         // Wealth
         (I18nKey::WealthTitle, AppLocale::En) => "💶 PERSONAL WEALTH & INFLATION EROSION SIMULATOR",
