@@ -693,7 +693,7 @@ impl eframe::App for MoneyCraftGui {
                 (2008, "2008: Global Financial Crisis"),
                 (2020, "2020: Covid Liquidity Shock"),
             ] {
-                if ui.button(format!("{name}")).clicked() {
+                if ui.button(name.to_string()).clicked() {
                     self.show_historic_panics = true;
                     if *year < 1850 {
                         self.set_date_preset(DateRangePreset::AllTime1720);
@@ -2220,8 +2220,14 @@ impl MoneyCraftGui {
 }
 
 fn main() -> Result<(), eframe::Error> {
-    let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
-    let store = DatabaseStore::open_in_memory().expect("Failed to initialize sovereign SQLite store");
+    let rt = tokio::runtime::Runtime::new().unwrap_or_else(|e| {
+        eprintln!("Failed to create Tokio runtime: {e}");
+        std::process::exit(1);
+    });
+    let store = DatabaseStore::open_in_memory().unwrap_or_else(|e| {
+        eprintln!("Failed to initialize local SQLite store: {e}");
+        std::process::exit(1);
+    });
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

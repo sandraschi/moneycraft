@@ -14,6 +14,7 @@
 
 pub mod history;
 pub mod i18n;
+pub mod stripe;
 
 use databasecraft_store::DatabaseStore;
 use moneycraft_feed::MarketFeed;
@@ -159,6 +160,21 @@ pub enum Command {
         price: Option<f64>,
     },
     PortfolioSummary,
+    StripeStatus,
+    StripeSync {
+        resource: Option<String>,
+        db_path: Option<String>,
+        fixtures_dir: Option<String>,
+    },
+    StripeSubscriptions {
+        db_path: Option<String>,
+        fixtures_dir: Option<String>,
+    },
+    StripeReconcile {
+        db_path: Option<String>,
+        fixtures_dir: Option<String>,
+        fixtures_base: Option<String>,
+    },
 }
 
 pub fn compute_personal_wealth_projection(cfg: &PersonalWealthConfig) -> PersonalWealthReport {
@@ -666,5 +682,19 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
                 ]
             })
         }
+        Command::StripeStatus => stripe::status_from_env(),
+        Command::StripeSync {
+            resource,
+            db_path,
+            fixtures_dir,
+        } => stripe::sync_command(resource, db_path, fixtures_dir).await,
+        Command::StripeSubscriptions { db_path, fixtures_dir } => {
+            stripe::subscriptions_command(db_path, fixtures_dir).await
+        }
+        Command::StripeReconcile {
+            db_path,
+            fixtures_dir,
+            fixtures_base,
+        } => stripe::reconcile_command(db_path, fixtures_dir, fixtures_base).await,
     }
 }

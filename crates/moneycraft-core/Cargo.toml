@@ -14,3 +14,4 @@ tokio.workspace = true
 chrono.workspace = true
 databasecraft-store.workspace = true
 databasecraft-core.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

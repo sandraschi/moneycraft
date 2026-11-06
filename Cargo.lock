@@ -2215,6 +2215,7 @@ dependencies = [
  "databasecraft-core",
  "databasecraft-store",
  "moneycraft-feed",
+ "reqwest",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

@@ -83,6 +83,41 @@ enum Commands {
         #[arg(long, default_value_t = 5)]
         years: usize,
     },
+    /// Check Stripe configuration (keys present, test vs live) — never prints secrets
+    StripeStatus,
+    /// Sync Stripe objects into the local billing mirror (fixtures or live API)
+    StripeSync {
+        /// Resource to sync (customers, products, prices, subscriptions, invoices); omit for all
+        #[arg(long)]
+        resource: Option<String>,
+        /// SQLite file to persist the mirror into (omit = in-memory, reported, not persisted)
+        #[arg(long)]
+        db: Option<String>,
+        /// Directory of recorded fixture JSON files (offline mode, no network)
+        #[arg(long)]
+        fixtures: Option<String>,
+    },
+    /// List subscriptions with status rollup (mirror DB or fixtures/live)
+    StripeSubscriptions {
+        /// SQLite file holding the mirror (omit = parse fixtures/live directly)
+        #[arg(long)]
+        db: Option<String>,
+        /// Recorded fixture directory (offline mode)
+        #[arg(long)]
+        fixtures: Option<String>,
+    },
+    /// Reconcile local mirror vs fresh data; reports missing + drift, changes nothing
+    StripeReconcile {
+        /// SQLite file holding the mirror to compare
+        #[arg(long)]
+        db: Option<String>,
+        /// Fresh fixture directory (offline mode)
+        #[arg(long)]
+        fixtures: Option<String>,
+        /// Baseline fixture directory to seed an empty mirror first (tests/CI)
+        #[arg(long)]
+        fixtures_base: Option<String>,
+    },
 }
 
 fn main() {
@@ -162,6 +197,22 @@ fn main() {
                 simulation_years: years,
             };
             let res = rt.block_on(dispatch(Command::SimulatePersonalWealth { config: cfg }, &store));
+            println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
+        }
+        Some(Commands::StripeStatus) => {
+            let res = rt.block_on(dispatch(Command::StripeStatus, &store));
+            println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
+        }
+        Some(Commands::StripeSync { resource, db, fixtures }) => {
+            let res = rt.block_on(dispatch(Command::StripeSync { resource, db_path: db, fixtures_dir: fixtures }, &store));
+            println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
+        }
+        Some(Commands::StripeSubscriptions { db, fixtures }) => {
+            let res = rt.block_on(dispatch(Command::StripeSubscriptions { db_path: db, fixtures_dir: fixtures }, &store));
+            println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
+        }
+        Some(Commands::StripeReconcile { db, fixtures, fixtures_base }) => {
+            let res = rt.block_on(dispatch(Command::StripeReconcile { db_path: db, fixtures_dir: fixtures, fixtures_base }, &store));
             println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
         }
         None => {
@@ -269,6 +320,46 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
                                     "years": { "type": "integer", "description": "Simulation horizon in years (1 to 10)" }
                                 }
                             }
+                        },
+                        {
+                            "name": "finance_stripe_status",
+                            "description": "Check Stripe configuration (keys present, test vs live) — never reveals secrets",
+                            "inputSchema": { "type": "object", "properties": {} }
+                        },
+                        {
+                            "name": "finance_stripe_sync",
+                            "description": "Sync Stripe objects (customers, products, prices, subscriptions, invoices) into the local billing mirror, from fixtures or the live API",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "resource": { "type": "string" },
+                                    "db": { "type": "string" },
+                                    "fixtures": { "type": "string" }
+                                }
+                            }
+                        },
+                        {
+                            "name": "finance_stripe_subscriptions",
+                            "description": "List subscriptions with status rollup (mirror DB or fixtures/live)",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "db": { "type": "string" },
+                                    "fixtures": { "type": "string" }
+                                }
+                            }
+                        },
+                        {
+                            "name": "finance_stripe_reconcile",
+                            "description": "Reconcile local billing mirror vs fresh data (fixtures or live API); reports missing + drift, changes nothing",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "db": { "type": "string" },
+                                    "fixtures": { "type": "string" },
+                                    "fixtures_base": { "type": "string" }
+                                }
+                            }
                         }
                     ]
                 }
@@ -317,6 +408,24 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
                         };
                         rt.block_on(dispatch(Command::SimulatePersonalWealth { config: cfg }, store))
                     }
+                    "finance_stripe_status" => rt.block_on(dispatch(Command::StripeStatus, store)),
+                    "finance_stripe_sync" => {
+                        let r = args["resource"].as_str().map(|s| s.to_string());
+                        let d = args["db"].as_str().map(|s| s.to_string());
+                        let f = args["fixtures"].as_str().map(|s| s.to_string());
+                        rt.block_on(dispatch(Command::StripeSync { resource: r, db_path: d, fixtures_dir: f }, store))
+                    }
+                    "finance_stripe_subscriptions" => {
+                        let d = args["db"].as_str().map(|s| s.to_string());
+                        let f = args["fixtures"].as_str().map(|s| s.to_string());
+                        rt.block_on(dispatch(Command::StripeSubscriptions { db_path: d, fixtures_dir: f }, store))
+                    }
+                    "finance_stripe_reconcile" => {
+                        let d = args["db"].as_str().map(|s| s.to_string());
+                        let f = args["fixtures"].as_str().map(|s| s.to_string());
+                        let b = args["fixtures_base"].as_str().map(|s| s.to_string());
+                        rt.block_on(dispatch(Command::StripeReconcile { db_path: d, fixtures_dir: f, fixtures_base: b }, store))
+                    }
                     unknown => json!({ "success": false, "error": format!("Unknown tool '{unknown}'") })
                 };
 
@@ -329,7 +438,7 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
             _ => json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32601, "message": "Method not found" } })
         };
 
-        let _ = writeln!(stdout, "{}", resp.to_string());
+        let _ = writeln!(stdout, "{resp}");
         let _ = stdout.flush();
     }
 }

@@ -233,7 +233,7 @@ impl MarketFeed {
             running_cvd += bar_delta;
 
             candles.push(CandleBar {
-                timestamp_ms: base_timestamp + (i as u64) * 3600_000,
+                timestamp_ms: base_timestamp + (i as u64) * 3_600_000,
                 open,
                 high,
                 low,
@@ -969,8 +969,8 @@ impl MarketFeed {
         let mut candles = Vec::new();
         let mut running_cvd = 0.0;
 
-        for i in 0..timestamps.len() {
-            let ts_sec = timestamps[i].as_u64().unwrap_or(0);
+        for (i, ts) in timestamps.iter().enumerate() {
+            let ts_sec = ts.as_u64().unwrap_or(0);
             let o = opens.get(i).and_then(|v| v.as_f64());
             let h = highs.get(i).and_then(|v| v.as_f64());
             let l = lows.get(i).and_then(|v| v.as_f64());
