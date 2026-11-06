@@ -1378,7 +1378,11 @@ impl MoneyCraftGui {
                             ui.label(egui::RichText::new(format!("Auth: {}", s.auth_type)).small().monospace());
                             ui.label(&s.description);
                             ui.separator();
-                            ui.label(egui::RichText::new(&s.payola_breakdown).small().color(Color32::from_rgb(160, 174, 192)));
+                            ui.label(
+                                egui::RichText::new(&s.payola_breakdown)
+                                    .small()
+                                    .color(ui.visuals().weak_text_color()),
+                            );
 
                             ui.add_space(4.0);
                             if is_active {
