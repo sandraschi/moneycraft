@@ -672,7 +672,11 @@ impl eframe::App for MoneyCraftGui {
                                     .color(amber)
                                     .monospace(),
                             );
-                            ui.label(egui::RichText::new(txt).color(Color32::WHITE).strong());
+                            ui.label(
+                                egui::RichText::new(txt)
+                                    .color(ui.visuals().strong_text_color())
+                                    .strong(),
+                            );
                             ui.label(
                                 egui::RichText::new(format!("• {sentiment}"))
                                     .color(s_color)
@@ -730,10 +734,12 @@ impl eframe::App for MoneyCraftGui {
             egui::CollapsingHeader::new("TERMINAL FUNCTIONS")
                 .default_open(true)
                 .show(ui, |ui| {
-                let nav_btn = |ui: &mut egui::Ui, active: bool, text: &str| -> bool {
-                    let rich = egui::RichText::new(text).color(if active { amber } else { Color32::WHITE });
-                    ui.selectable_label(active, rich).clicked()
-                };
+            let nav_btn = |ui: &mut egui::Ui, active: bool, text: &str| -> bool {
+                let inactive = ui.visuals().text_color();
+                let rich =
+                    egui::RichText::new(text).color(if active { amber } else { inactive });
+                ui.selectable_label(active, rich).clicked()
+            };
 
                 let loc = self.locale;
                 use moneycraft_core::i18n::{t, I18nKey};
@@ -2502,7 +2508,11 @@ impl MoneyCraftGui {
                                         format!("{r8:.4}%"),
                                     );
                                     ui.colored_label(
-                                        if apr >= 20.0 { green } else { Color32::WHITE },
+                                        if apr >= 20.0 {
+                                            green
+                                        } else {
+                                            ui.visuals().strong_text_color()
+                                        },
                                         format!("{apr:.2}%"),
                                     );
                                     ui.label(format!("${oi:.1}M"));
