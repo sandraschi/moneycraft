@@ -135,6 +135,17 @@ enum Commands {
         #[arg(long)]
         balance: Option<f64>,
     },
+    /// Attempt a live order (always refuses: live routing is not implemented)
+    PlaceOrder {
+        #[arg(default_value = "BTC/USD")]
+        symbol: String,
+        #[arg(long, default_value = "LONG")]
+        side: String,
+        #[arg(long, default_value_t = 1.0)]
+        quantity: f64,
+        #[arg(long)]
+        price: Option<f64>,
+    },
 }
 
 fn main() {
@@ -333,6 +344,23 @@ fn main() {
             ));
             println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
         }
+        Some(Commands::PlaceOrder {
+            symbol,
+            side,
+            quantity,
+            price,
+        }) => {
+            let res = rt.block_on(dispatch(
+                Command::PlaceOrder {
+                    symbol,
+                    side,
+                    quantity,
+                    price,
+                },
+                &store,
+            ));
+            println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
+        }
         None => {
             println!("MoneyCraft CLI v{APP_VERSION} on Port {CONTROL_PORT}");
             println!("Use --help to view available commands or --mcp to start JSON-RPC server.");
@@ -522,6 +550,20 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
                                     "initial_balance": { "type": "number" }
                                 }
                             }
+                        },
+                        {
+                            "name": "finance_place_order",
+                            "description": "Attempt a live order. Always refuses: live routing is not implemented, MoneyCraft is paper-trading only. Use finance_paper_open for the fantasy desk.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "symbol": { "type": "string" },
+                                    "side": { "type": "string" },
+                                    "quantity": { "type": "number" },
+                                    "price": { "type": "number" }
+                                },
+                                "required": ["symbol"]
+                            }
                         }
                     ]
                 }
@@ -693,6 +735,21 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
                         rt.block_on(dispatch(
                             Command::PaperResetAccount {
                                 initial_balance: bal,
+                            },
+                            store,
+                        ))
+                    }
+                    "finance_place_order" => {
+                        let sym = args["symbol"].as_str().unwrap_or("").to_string();
+                        let side = args["side"].as_str().unwrap_or("").to_string();
+                        let qty = args["quantity"].as_f64().unwrap_or(0.0);
+                        let price = args["price"].as_f64();
+                        rt.block_on(dispatch(
+                            Command::PlaceOrder {
+                                symbol: sym,
+                                side,
+                                quantity: qty,
+                                price,
                             },
                             store,
                         ))
