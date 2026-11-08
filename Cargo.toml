@@ -2,6 +2,7 @@
 members = [
     "crates/moneycraft-core",
     "crates/moneycraft-feed",
+    "crates/moneycraft-broker",
     "crates/moneycraft-mcp",
     "crates/moneycraft-app",
 ]

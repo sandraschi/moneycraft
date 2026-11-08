@@ -2208,12 +2208,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "moneycraft-broker"
+version = "0.7.0"
+dependencies = [
+ "moneycraft-feed",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "moneycraft-core"
 version = "0.7.0"
 dependencies = [
  "chrono",
  "databasecraft-core",
  "databasecraft-store",
+ "moneycraft-broker",
  "moneycraft-feed",
  "serde",
  "serde_json",

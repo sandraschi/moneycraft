@@ -1,0 +1,11 @@
+[package]
+name = "moneycraft-broker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+moneycraft-feed = { path = "../moneycraft-feed" }
+serde.workspace = true
+serde_json.workspace = true

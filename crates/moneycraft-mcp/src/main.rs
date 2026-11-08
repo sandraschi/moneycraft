@@ -6,6 +6,8 @@
 #![deny(clippy::panic)]
 #![deny(clippy::unimplemented)]
 #![deny(clippy::todo)]
+// The tools/list payload is one big json! literal; keep the macro happy.
+#![recursion_limit = "256"]
 
 use clap::{Parser, Subcommand};
 use databasecraft_store::DatabaseStore;
@@ -208,6 +210,27 @@ enum Commands {
         from: String,
         #[arg(long, default_value = "EUR")]
         to: String,
+    },
+    /// List compiled broker venues + risk limits (paper only until a live adapter ships)
+    Brokers,
+    /// Place an order through a broker venue (paper only; dry-run supported)
+    BrokerPlace {
+        #[arg(long, default_value = "paper")]
+        broker: String,
+        #[arg(default_value = "AAPL")]
+        symbol: String,
+        #[arg(long, default_value = "LONG")]
+        side: String,
+        #[arg(long, default_value = "SPOT")]
+        order_type: String,
+        #[arg(long, default_value_t = 1.0)]
+        quantity: f64,
+        #[arg(long, default_value_t = 1.0)]
+        leverage: f64,
+        #[arg(long)]
+        price: Option<f64>,
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
     },
 }
 
@@ -502,6 +525,35 @@ fn main() {
             let res = rt.block_on(dispatch(Command::FxConvert { amount, from, to }, &store));
             println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
         }
+        Some(Commands::Brokers) => {
+            let res = rt.block_on(dispatch(Command::BrokerStatus, &store));
+            println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
+        }
+        Some(Commands::BrokerPlace {
+            broker,
+            symbol,
+            side,
+            order_type,
+            quantity,
+            leverage,
+            price,
+            dry_run,
+        }) => {
+            let res = rt.block_on(dispatch(
+                Command::BrokerPlace {
+                    broker: Some(broker),
+                    symbol,
+                    side,
+                    order_type,
+                    quantity,
+                    leverage,
+                    price,
+                    dry_run,
+                },
+                &store,
+            ));
+            println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
+        }
         None => {
             println!("MoneyCraft CLI v{APP_VERSION} on Port {CONTROL_PORT}");
             println!("Use --help to view available commands or --mcp to start JSON-RPC server.");
@@ -604,6 +656,29 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
                                     "to": { "type": "string", "description": "e.g. EUR" }
                                 },
                                 "required": ["amount", "from", "to"]
+                            }
+                        },
+                        {
+                            "name": "finance_brokers",
+                            "description": "List compiled broker venues, risk limits, and whether any live venue is armed. Paper only until a live adapter ships.",
+                            "inputSchema": { "type": "object", "properties": {} }
+                        },
+                        {
+                            "name": "finance_broker_place",
+                            "description": "Place an order through a broker venue. Only 'paper' exists: validates against venue limits, fills against the synthetic reference price or dry-runs. Unknown venues are refused. No real funds anywhere.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "broker": { "type": "string", "description": "'paper' (the only compiled venue)" },
+                                    "symbol": { "type": "string" },
+                                    "side": { "type": "string", "description": "LONG/BUY or SHORT/SELL" },
+                                    "order_type": { "type": "string", "description": "SPOT or PERP_FUTURES" },
+                                    "quantity": { "type": "number" },
+                                    "leverage": { "type": "number" },
+                                    "price": { "type": "number", "description": "Limit price; omit for reference-price fill" },
+                                    "dry_run": { "type": "boolean", "description": "Validate only, book nothing" }
+                                },
+                                "required": ["symbol"]
                             }
                         },
                         { "name": "finance_historic_panics", "description": "List all 19 major historical financial crises and market panics from 1720 South Sea Bubble to modern day", "inputSchema": { "type": "object", "properties": {} } },
@@ -852,6 +927,30 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
                                 amount: amt,
                                 from,
                                 to,
+                            },
+                            store,
+                        ))
+                    }
+                    "finance_brokers" => rt.block_on(dispatch(Command::BrokerStatus, store)),
+                    "finance_broker_place" => {
+                        let venue = args["broker"].as_str().map(|s| s.to_string());
+                        let sym = args["symbol"].as_str().unwrap_or("").to_string();
+                        let side = args["side"].as_str().unwrap_or("LONG").to_string();
+                        let ot = args["order_type"].as_str().unwrap_or("SPOT").to_string();
+                        let qty = args["quantity"].as_f64().unwrap_or(0.0);
+                        let lev = args["leverage"].as_f64().unwrap_or(1.0);
+                        let price = args["price"].as_f64();
+                        let dry = args["dry_run"].as_bool().unwrap_or(false);
+                        rt.block_on(dispatch(
+                            Command::BrokerPlace {
+                                broker: venue,
+                                symbol: sym,
+                                side,
+                                order_type: ot,
+                                quantity: qty,
+                                leverage: lev,
+                                price,
+                                dry_run: dry,
                             },
                             store,
                         ))
@@ -1107,7 +1206,7 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
                                     "role": "user",
                                     "content": {
                                         "type": "text",
-                                        "text": "MoneyCraft is a paper-trading terminal. No tool here moves real money — finance_place_order always refuses. Start with finance_universe to discover tickers (indices, 15 stocks, any FROM/TO forex cross of 20 majors, BTC/ETH/SOL quotes). Prices: finance_ticker (yahoo = 15-min delayed default, binance/hyperliquid = live crypto, ecb = daily fixing, synthetic = offline model). Compare baskets with finance_compare, derivatives with finance_derivatives, wire with finance_news. Fantasy desk: finance_paper_account/open/close/reset are stateless demo calls. Real books: finance_ledger_add/holdings/transactions/import/valuation backed by moneycraft-ledger.db (FIFO lots, SELL without lots refused, crypto refused, KESt 27.5% estimate labeled estimate). finance_fx_convert is offline indicative math. finance_universe lists everything queryable. Delays are labeled on every response; synthetic fallbacks say so. Never present delayed, synthetic, or demo numbers as live tradable quotes."
+                                        "text": "MoneyCraft is a paper-trading terminal. No tool here moves real money — finance_place_order always refuses. Start with finance_universe to discover tickers (indices, 15 stocks, any FROM/TO forex cross of 20 majors, BTC/ETH/SOL quotes). Prices: finance_ticker (yahoo = 15-min delayed default, binance/hyperliquid = live crypto, ecb = daily fixing, synthetic = offline model). Compare baskets with finance_compare, derivatives with finance_derivatives, wire with finance_news. Fantasy desk: finance_paper_account/open/close/reset are stateless demo calls. Real books: finance_ledger_add/holdings/transactions/import/valuation backed by moneycraft-ledger.db (FIFO lots, SELL without lots refused, crypto refused, KESt 27.5% estimate labeled estimate). finance_fx_convert is offline indicative math. finance_universe lists everything queryable. Brokers: finance_brokers shows compiled venues (paper only — this binary cannot send real orders); finance_broker_place validates against venue limits and fills against the synthetic reference or dry-runs. Delays are labeled on every response; synthetic fallbacks say so. Never present delayed, synthetic, or demo numbers as live tradable quotes."
                                     }
                                 }
                             ]

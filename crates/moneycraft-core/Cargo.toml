@@ -7,6 +7,7 @@ authors.workspace = true
 
 [dependencies]
 moneycraft-feed = { path = "../moneycraft-feed" }
+moneycraft-broker = { path = "../moneycraft-broker" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

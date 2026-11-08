@@ -17,6 +17,7 @@ pub mod i18n;
 pub mod ledger;
 
 use databasecraft_store::DatabaseStore;
+use moneycraft_broker::Broker;
 use moneycraft_feed::MarketFeed;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -195,6 +196,17 @@ pub enum Command {
         amount: f64,
         from: String,
         to: String,
+    },
+    BrokerStatus,
+    BrokerPlace {
+        broker: Option<String>,
+        symbol: String,
+        side: String,
+        order_type: String,
+        quantity: f64,
+        leverage: f64,
+        price: Option<f64>,
+        dry_run: bool,
     },
 }
 
@@ -530,14 +542,13 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
             let summary = MarketFeed::summarize_ticker(&symbol, &candles);
             let fill_price = price.unwrap_or(summary.current_price);
             let lev = leverage.clamp(1.0, 50.0);
-            let notional = fill_price * quantity;
-            let margin = notional / lev;
-
-            let liq_price = if side.to_uppercase() == "LONG" {
-                fill_price * (1.0 - (0.9 / lev))
-            } else {
-                fill_price * (1.0 + (0.9 / lev))
-            };
+            // Shared fill math with the broker crate: same formulas, same numbers.
+            let (margin, liq_price) = moneycraft_broker::size_position(
+                fill_price,
+                quantity,
+                lev,
+                side.to_uppercase() == "LONG",
+            );
 
             let pos = PaperPosition {
                 id: format!(
@@ -840,6 +851,64 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
                     "error": format!(
                         "fx convert refused: unknown currency in {f}/{t}. Expected two of the 20 majors."
                     ),
+                }),
+            }
+        }
+        Command::BrokerStatus => {
+            let limits = moneycraft_broker::BrokerLimits::default();
+            json!({
+                "success": true,
+                "brokers": moneycraft_broker::available_brokers(),
+                "live_armed": false,
+                "limits": limits,
+                "note": "Paper venue only. Live adapters arrive as cargo features; this binary cannot send real orders.",
+            })
+        }
+        Command::BrokerPlace {
+            broker,
+            symbol,
+            side,
+            order_type,
+            quantity,
+            leverage,
+            price,
+            dry_run,
+        } => {
+            let venue = broker.unwrap_or_else(|| "paper".to_string());
+            if venue != moneycraft_broker::PAPER_VENUE {
+                return json!({
+                    "success": false,
+                    "error": format!(
+                        "broker place refused: venue '{venue}' is not compiled into this binary. Available: {:?}. See LIVE_TRADING_PLAN.md.",
+                        moneycraft_broker::available_brokers(),
+                    ),
+                });
+            }
+            let Some(side) = moneycraft_broker::Side::parse(&side) else {
+                return json!({"success": false, "error": "broker place refused: side must be LONG/BUY or SHORT/SELL."});
+            };
+            let Some(order_type) = moneycraft_broker::OrderType::parse(&order_type) else {
+                return json!({"success": false, "error": "broker place refused: order_type must be SPOT or PERP_FUTURES."});
+            };
+            let Some(reference) = moneycraft_broker::reference_price(&symbol) else {
+                return json!({"success": false, "error": format!("broker place refused: no reference price for {symbol}.")});
+            };
+            let adapter = moneycraft_broker::PaperBroker::default();
+            let order = moneycraft_broker::NewOrder {
+                symbol: symbol.clone(),
+                side,
+                order_type,
+                quantity,
+                leverage,
+                limit_price: price,
+                dry_run,
+            };
+            match adapter.place(order, reference) {
+                Err(e) => json!({"success": false, "error": e}),
+                Ok(ack) => json!({
+                    "success": true,
+                    "message": format!("Paper-broker {} for {symbol} ({}x {})", ack.status, leverage, side.as_str()),
+                    "ack": ack,
                 }),
             }
         }
