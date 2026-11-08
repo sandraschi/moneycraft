@@ -146,6 +146,59 @@ enum Commands {
         #[arg(long)]
         price: Option<f64>,
     },
+    /// Book a real holding into the personal ledger (stocks, ETFs, bonds, cash — no crypto)
+    LedgerAdd {
+        symbol: String,
+        #[arg(long, default_value = "BUY")]
+        side: String,
+        #[arg(long)]
+        quantity: f64,
+        #[arg(long)]
+        price: f64,
+        #[arg(long)]
+        asset_class: Option<String>,
+        #[arg(long, default_value = "EUR")]
+        currency: String,
+        #[arg(long, default_value = "manual")]
+        venue: String,
+        #[arg(long)]
+        date: Option<String>,
+        #[arg(long, default_value_t = 0.0)]
+        fees: f64,
+        #[arg(long)]
+        note: Option<String>,
+        #[arg(long)]
+        db: Option<String>,
+    },
+    /// Show FIFO holdings with cost basis (no market prices)
+    LedgerHoldings {
+        #[arg(long)]
+        db: Option<String>,
+    },
+    /// List raw ledger bookings, newest first
+    LedgerTransactions {
+        #[arg(long)]
+        symbol: Option<String>,
+        #[arg(long, default_value_t = 200)]
+        limit: usize,
+        #[arg(long)]
+        db: Option<String>,
+    },
+    /// Import a broker/bank CSV export (semicolon/comma, UTF-8/cp1252)
+    LedgerImport {
+        path: String,
+        #[arg(long, default_value = "csv-import")]
+        venue: String,
+        #[arg(long)]
+        db: Option<String>,
+    },
+    /// Full valuation: live prices, unrealized PnL, realized YTD, KESt estimate
+    LedgerValuation {
+        #[arg(long, default_value = "yahoo")]
+        source: String,
+        #[arg(long)]
+        db: Option<String>,
+    },
 }
 
 fn main() {
@@ -361,6 +414,76 @@ fn main() {
             ));
             println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
         }
+        Some(Commands::LedgerAdd {
+            symbol,
+            side,
+            quantity,
+            price,
+            asset_class,
+            currency,
+            venue,
+            date,
+            fees,
+            note,
+            db,
+        }) => {
+            let acquired = date
+                .as_deref()
+                .and_then(moneycraft_core::ledger::parse_date_ms);
+            let res = rt.block_on(dispatch(
+                Command::LedgerAdd {
+                    symbol,
+                    asset_class,
+                    side,
+                    quantity,
+                    price,
+                    currency: Some(currency),
+                    venue: Some(venue),
+                    acquired_ms: acquired,
+                    fees: Some(fees),
+                    note,
+                    db_path: db,
+                },
+                &store,
+            ));
+            println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
+        }
+        Some(Commands::LedgerHoldings { db }) => {
+            let res = rt.block_on(dispatch(Command::LedgerHoldings { db_path: db }, &store));
+            println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
+        }
+        Some(Commands::LedgerTransactions { symbol, limit, db }) => {
+            let res = rt.block_on(dispatch(
+                Command::LedgerTransactions {
+                    symbol,
+                    limit: Some(limit),
+                    db_path: db,
+                },
+                &store,
+            ));
+            println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
+        }
+        Some(Commands::LedgerImport { path, venue, db }) => {
+            let res = rt.block_on(dispatch(
+                Command::LedgerImportCsv {
+                    path,
+                    venue: Some(venue),
+                    db_path: db,
+                },
+                &store,
+            ));
+            println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
+        }
+        Some(Commands::LedgerValuation { source, db }) => {
+            let res = rt.block_on(dispatch(
+                Command::LedgerValuation {
+                    source: Some(source),
+                    db_path: db,
+                },
+                &store,
+            ));
+            println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
+        }
         None => {
             println!("MoneyCraft CLI v{APP_VERSION} on Port {CONTROL_PORT}");
             println!("Use --help to view available commands or --mcp to start JSON-RPC server.");
@@ -564,6 +687,73 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
                                 },
                                 "required": ["symbol"]
                             }
+                        },
+                        {
+                            "name": "finance_ledger_add",
+                            "description": "Book a real holding into the personal ledger (stocks, ETFs, bonds, cash). Crypto is refused — it belongs in the fantasy desk.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "symbol": { "type": "string", "description": "e.g. AAPL, SAP.DE, EUR (cash)" },
+                                    "side": { "type": "string", "description": "BUY or SELL" },
+                                    "quantity": { "type": "number" },
+                                    "price": { "type": "number", "description": "Per-unit price in currency" },
+                                    "asset_class": { "type": "string", "description": "EQUITY, ETF, BOND, FOREX, CASH, COMMODITY (auto-detected if omitted)" },
+                                    "currency": { "type": "string" },
+                                    "venue": { "type": "string", "description": "Broker/bank label, e.g. flatex, George, manual" },
+                                    "date": { "type": "string", "description": "YYYY-MM-DD or DD.MM.YYYY; default now" },
+                                    "fees": { "type": "number" },
+                                    "note": { "type": "string" },
+                                    "db": { "type": "string", "description": "Ledger file; default moneycraft-ledger.db" }
+                                },
+                                "required": ["symbol", "quantity", "price"]
+                            }
+                        },
+                        {
+                            "name": "finance_ledger_holdings",
+                            "description": "FIFO holdings with cost basis per symbol (no market prices — see finance_ledger_valuation).",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "db": { "type": "string" }
+                                }
+                            }
+                        },
+                        {
+                            "name": "finance_ledger_transactions",
+                            "description": "Raw ledger bookings, newest first, with optional symbol filter.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "symbol": { "type": "string" },
+                                    "limit": { "type": "integer" },
+                                    "db": { "type": "string" }
+                                }
+                            }
+                        },
+                        {
+                            "name": "finance_ledger_import",
+                            "description": "Import a broker/bank CSV export (semicolon/comma, UTF-8/cp1252, German or English headers). Reports imported + skipped rows.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "path": { "type": "string" },
+                                    "venue": { "type": "string" },
+                                    "db": { "type": "string" }
+                                },
+                                "required": ["path"]
+                            }
+                        },
+                        {
+                            "name": "finance_ledger_valuation",
+                            "description": "Full valuation: live prices, unrealized PnL, realized YTD, Austrian KESt estimate (27.5%, estimate only, not tax advice).",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "source": { "type": "string", "description": "yahoo (15-min delayed), synthetic, ecb" },
+                                    "db": { "type": "string" }
+                                }
+                            }
                         }
                     ]
                 }
@@ -750,6 +940,78 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
                                 side,
                                 quantity: qty,
                                 price,
+                            },
+                            store,
+                        ))
+                    }
+                    "finance_ledger_add" => {
+                        let sym = args["symbol"].as_str().unwrap_or("").to_string();
+                        let side = args["side"].as_str().unwrap_or("BUY").to_string();
+                        let qty = args["quantity"].as_f64().unwrap_or(0.0);
+                        let price = args["price"].as_f64().unwrap_or(0.0);
+                        let class = args["asset_class"].as_str().map(|s| s.to_string());
+                        let ccy = args["currency"].as_str().map(|s| s.to_string());
+                        let venue = args["venue"].as_str().map(|s| s.to_string());
+                        let acquired = args["date"]
+                            .as_str()
+                            .and_then(moneycraft_core::ledger::parse_date_ms);
+                        let fees = args["fees"].as_f64();
+                        let note = args["note"].as_str().map(|s| s.to_string());
+                        let db = args["db"].as_str().map(|s| s.to_string());
+                        rt.block_on(dispatch(
+                            Command::LedgerAdd {
+                                symbol: sym,
+                                asset_class: class,
+                                side,
+                                quantity: qty,
+                                price,
+                                currency: ccy,
+                                venue,
+                                acquired_ms: acquired,
+                                fees,
+                                note,
+                                db_path: db,
+                            },
+                            store,
+                        ))
+                    }
+                    "finance_ledger_holdings" => {
+                        let db = args["db"].as_str().map(|s| s.to_string());
+                        rt.block_on(dispatch(Command::LedgerHoldings { db_path: db }, store))
+                    }
+                    "finance_ledger_transactions" => {
+                        let sym = args["symbol"].as_str().map(|s| s.to_string());
+                        let limit = args["limit"].as_u64().map(|l| l as usize);
+                        let db = args["db"].as_str().map(|s| s.to_string());
+                        rt.block_on(dispatch(
+                            Command::LedgerTransactions {
+                                symbol: sym,
+                                limit,
+                                db_path: db,
+                            },
+                            store,
+                        ))
+                    }
+                    "finance_ledger_import" => {
+                        let path = args["path"].as_str().unwrap_or("").to_string();
+                        let venue = args["venue"].as_str().map(|s| s.to_string());
+                        let db = args["db"].as_str().map(|s| s.to_string());
+                        rt.block_on(dispatch(
+                            Command::LedgerImportCsv {
+                                path,
+                                venue,
+                                db_path: db,
+                            },
+                            store,
+                        ))
+                    }
+                    "finance_ledger_valuation" => {
+                        let src = args["source"].as_str().map(|s| s.to_string());
+                        let db = args["db"].as_str().map(|s| s.to_string());
+                        rt.block_on(dispatch(
+                            Command::LedgerValuation {
+                                source: src,
+                                db_path: db,
                             },
                             store,
                         ))

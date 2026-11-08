@@ -14,6 +14,7 @@
 
 pub mod history;
 pub mod i18n;
+pub mod ledger;
 
 use databasecraft_store::DatabaseStore;
 use moneycraft_feed::MarketFeed;
@@ -159,6 +160,36 @@ pub enum Command {
         price: Option<f64>,
     },
     PortfolioSummary,
+    LedgerAdd {
+        symbol: String,
+        asset_class: Option<String>,
+        side: String,
+        quantity: f64,
+        price: f64,
+        currency: Option<String>,
+        venue: Option<String>,
+        acquired_ms: Option<i64>,
+        fees: Option<f64>,
+        note: Option<String>,
+        db_path: Option<String>,
+    },
+    LedgerHoldings {
+        db_path: Option<String>,
+    },
+    LedgerTransactions {
+        symbol: Option<String>,
+        limit: Option<usize>,
+        db_path: Option<String>,
+    },
+    LedgerImportCsv {
+        path: String,
+        venue: Option<String>,
+        db_path: Option<String>,
+    },
+    LedgerValuation {
+        source: Option<String>,
+        db_path: Option<String>,
+    },
 }
 
 pub fn compute_personal_wealth_projection(cfg: &PersonalWealthConfig) -> PersonalWealthReport {
@@ -688,6 +719,72 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
                 "error": "Live order routing is not implemented — MoneyCraft is paper-trading only. Use PaperOpenPosition for the fantasy desk. See README 'Going live' for the extension path.",
                 "hint": "Paper* commands simulate fills against synthetic feeds; nothing leaves this machine."
             })
+        }
+        Command::LedgerAdd {
+            symbol,
+            asset_class,
+            side,
+            quantity,
+            price,
+            currency,
+            venue,
+            acquired_ms,
+            fees,
+            note,
+            db_path,
+        } => match ledger::open_ledger_db(db_path.as_deref()) {
+            Err(e) => json!({"success": false, "error": e}),
+            Ok(db) => match ledger::add_transaction(
+                &db,
+                &symbol,
+                asset_class.as_deref(),
+                &side,
+                quantity,
+                price,
+                currency.as_deref(),
+                venue.as_deref(),
+                acquired_ms,
+                fees.unwrap_or(0.0),
+                note.as_deref(),
+            ) {
+                Err(e) => json!({"success": false, "error": e}),
+                Ok(id) => json!({
+                    "success": true, "id": id,
+                    "message": format!("Booked {side} {quantity} {} @ {price}", symbol.to_uppercase()),
+                }),
+            },
+        },
+        Command::LedgerHoldings { db_path } => match ledger::open_ledger_db(db_path.as_deref()) {
+            Err(e) => json!({"success": false, "error": e}),
+            Ok(db) => {
+                ledger::holdings(&db).unwrap_or_else(|e| json!({"success": false, "error": e}))
+            }
+        },
+        Command::LedgerTransactions {
+            symbol,
+            limit,
+            db_path,
+        } => match ledger::open_ledger_db(db_path.as_deref()) {
+            Err(e) => json!({"success": false, "error": e}),
+            Ok(db) => ledger::list_transactions(&db, symbol.as_deref(), limit.unwrap_or(200))
+                .unwrap_or_else(|e| json!({"success": false, "error": e})),
+        },
+        Command::LedgerImportCsv {
+            path,
+            venue,
+            db_path,
+        } => match ledger::open_ledger_db(db_path.as_deref()) {
+            Err(e) => json!({"success": false, "error": e}),
+            Ok(db) => ledger::import_csv(&db, &path, venue.as_deref().unwrap_or("csv-import"))
+                .unwrap_or_else(|e| json!({"success": false, "error": e})),
+        },
+        Command::LedgerValuation { source, db_path } => {
+            match ledger::open_ledger_db(db_path.as_deref()) {
+                Err(e) => json!({"success": false, "error": e}),
+                Ok(db) => ledger::valuation(&db, source)
+                    .await
+                    .unwrap_or_else(|e| json!({"success": false, "error": e})),
+            }
         }
         Command::PortfolioSummary => {
             json!({

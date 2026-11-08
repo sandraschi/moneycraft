@@ -474,10 +474,36 @@ impl MoneyCraftGui {
     }
 
     pub fn fetch_portfolio(&mut self) {
-        let res = self
-            .runtime
-            .block_on(dispatch(Command::PortfolioSummary, &self.store));
-        self.portfolio_data = Some(res);
+        // Real personal ledger (shared file with the CLI/MCP tools).
+        // Falls back to the legacy static snapshot only if valuation fails.
+        let src = Some(self.active_data_source.clone());
+        let res = self.runtime.block_on(dispatch(
+            Command::LedgerValuation {
+                source: src,
+                db_path: None,
+            },
+            &self.store,
+        ));
+        if res
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            self.portfolio_data = Some(res);
+        } else {
+            // Never fall back to the legacy hardcoded snapshot — show the
+            // error and the empty-state onboarding instead of mannequins.
+            let err = res
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("ledger unavailable")
+                .to_string();
+            self.portfolio_data = Some(serde_json::json!({
+                "success": true, "count": 0, "positions": [],
+                "totals_by_currency": {}, "kest_by_currency": {},
+                "valuation_error": err,
+            }));
+        }
     }
 }
 
@@ -3263,68 +3289,122 @@ impl MoneyCraftGui {
     fn render_portfolio_ledger(&mut self, ui: &mut egui::Ui) {
         let amber = theme_amber(ui);
         let green = theme_green(ui);
+        let red = theme_red();
 
         ui.heading(egui::RichText::new("💼 SOVEREIGN PORTFOLIO LEDGER").color(amber));
-        ui.label("Zero-leakage local balance sheet with real-time unrealized PnL & tax estimates:");
+        ui.label("Your real holdings — FIFO cost basis, live valuation, Austrian KESt estimate. No crypto, no mannequins.");
 
         ui.add_space(8.0);
-        if let Some(ref p) = self.portfolio_data {
+        let Some(ref p) = self.portfolio_data else {
+            ui.label("Open this workspace to load the ledger.");
+            return;
+        };
+        if let Some(err) = p.get("valuation_error").and_then(|v| v.as_str()) {
+            ui.colored_label(red, err);
+        }
+        let empty = p["count"].as_u64().unwrap_or(0) == 0;
+        if empty {
+            ui.label(
+                egui::RichText::new("Ledger is empty — nothing you own is tracked yet.").strong(),
+            );
+            ui.label("Add your first position from a terminal:");
+            ui.monospace("moneycraft-mcp ledger-add SAP.DE --side BUY --quantity 10 --price 228 --venue flatex");
+            ui.monospace(
+                "moneycraft-mcp ledger-add EUR --side BUY --quantity 3500 --price 1 --venue george",
+            );
+            ui.label("Or import a broker CSV (semicolon/comma, German/English headers):");
+            ui.monospace("moneycraft-mcp ledger-import ~/export.csv --venue flatex");
+            return;
+        }
+
+        if let Some(totals) = p["totals_by_currency"].as_object() {
             egui::Frame::group(ui.style()).show(ui, |ui| {
-                let total = p["total_equity_usd"].as_f64().unwrap_or(0.0);
-                let un_pnl = p["unrealized_pnl_usd"].as_f64().unwrap_or(0.0);
-                let tax = p["estimated_tax_liability"].as_f64().unwrap_or(0.0);
-
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new(format!("TOTAL EQUITY: ${total:.2}"))
-                            .size(16.0)
-                            .strong(),
-                    );
-                    ui.colored_label(green, format!("(UNREALIZED PnL: +${un_pnl:.2})"));
-                    ui.label(
-                        egui::RichText::new(format!("EST. TAX: ${tax:.2}"))
-                            .weak()
-                            .monospace(),
-                    );
-                });
-            });
-
-            ui.add_space(8.0);
-            if let Some(positions) = p["positions"].as_array() {
-                egui::Grid::new("positions_grid")
-                    .striped(true)
-                    .min_col_width(90.0)
-                    .show(ui, |ui| {
-                        ui.strong("Symbol");
-                        ui.strong("Class");
-                        ui.strong("Quantity");
-                        ui.strong("Entry");
-                        ui.strong("Current");
-                        ui.strong("PnL (USD)");
-                        ui.end_row();
-
-                        for pos in positions {
-                            let sym = pos["symbol"].as_str().unwrap_or("");
-                            let cls = pos["asset_class"].as_str().unwrap_or("");
-                            let qty = pos["qty"].as_f64().unwrap_or(0.0);
-                            let entry = pos["entry_price"].as_f64().unwrap_or(0.0);
-                            let cur = pos["current_price"].as_f64().unwrap_or(0.0);
-                            let pnl = pos["pnl_usd"].as_f64().unwrap_or(0.0);
-
-                            ui.label(sym);
-                            ui.label(cls);
-                            ui.label(format!("{qty:.2}"));
-                            ui.label(format!("{entry:.4}"));
-                            ui.label(format!("{cur:.4}"));
-                            ui.colored_label(
-                                if pnl >= 0.0 { green } else { Color32::RED },
-                                format!("{pnl:+.2}"),
-                            );
-                            ui.end_row();
-                        }
+                for (ccy, t) in totals {
+                    let mv = t["market_value"].as_f64().unwrap_or(0.0);
+                    let up = t["unrealized_pnl"].as_f64().unwrap_or(0.0);
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(format!("{ccy}: {mv:.2}"))
+                                .size(16.0)
+                                .strong(),
+                        );
+                        ui.colored_label(
+                            if up >= 0.0 { green } else { red },
+                            format!("({up:+.2} unrealized)"),
+                        );
                     });
+                }
+            });
+            ui.add_space(4.0);
+        }
+
+        if let Some(positions) = p["positions"].as_array() {
+            egui::Grid::new("positions_grid")
+                .striped(true)
+                .min_col_width(80.0)
+                .show(ui, |ui| {
+                    ui.strong("Symbol");
+                    ui.strong("Class");
+                    ui.strong("Ccy");
+                    ui.strong("Quantity");
+                    ui.strong("Avg cost");
+                    ui.strong("Current");
+                    ui.strong("Market value");
+                    ui.strong("PnL");
+                    ui.end_row();
+
+                    for pos in positions {
+                        let sym = pos["symbol"].as_str().unwrap_or("");
+                        let cls = pos["asset_class"].as_str().unwrap_or("");
+                        let ccy = pos["currency"].as_str().unwrap_or("");
+                        let qty = pos["quantity"].as_f64().unwrap_or(0.0);
+                        let avg = pos["avg_cost"].as_f64().unwrap_or(0.0);
+                        let cur = pos["current_price"].as_f64();
+                        let mv = pos["market_value"].as_f64();
+                        let pnl = pos["unrealized_pnl"].as_f64();
+
+                        ui.label(sym);
+                        ui.label(cls);
+                        ui.label(ccy);
+                        ui.label(format!("{qty:.2}"));
+                        ui.label(format!("{avg:.4}"));
+                        match cur {
+                            Some(c) => ui.label(format!("{c:.4}")).highlight(),
+                            None => ui.weak("no quote"),
+                        };
+                        match mv {
+                            Some(m) => ui.label(format!("{m:.2}")).highlight(),
+                            None => ui.weak("—"),
+                        };
+                        match pnl {
+                            Some(v) => ui.colored_label(
+                                if v >= 0.0 { green } else { red },
+                                format!("{v:+.2}"),
+                            ),
+                            None => ui.weak("—"),
+                        };
+                        ui.end_row();
+                    }
+                });
+        }
+
+        ui.add_space(4.0);
+        if let Some(kest) = p["kest_by_currency"].as_object() {
+            for (ccy, k) in kest {
+                let realized = k["realized_ytd"].as_f64().unwrap_or(0.0);
+                let est = k["kest_estimate"].as_f64().unwrap_or(0.0);
+                ui.label(format!(
+                    "Realized YTD ({ccy}): {realized:+.2} → KESt estimate: {est:.2}"
+                ));
             }
         }
+        ui.label(
+            egui::RichText::new(
+                "KESt estimate only: 27.5% flat on realized YTD gains. Not tax advice — talk to a Steuerberater.",
+            )
+            .small()
+            .weak(),
+        );
     }
 }
 
