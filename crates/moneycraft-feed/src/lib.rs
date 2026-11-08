@@ -245,21 +245,51 @@ impl MarketFeed {
         out
     }
 
+    /// True for one of the 20 major currencies (`USD`, `EUR`, …).
+    #[must_use]
+    pub fn is_currency(code: &str) -> bool {
+        Self::major_currencies()
+            .iter()
+            .any(|(c, _)| *c == code.trim().to_uppercase())
+    }
+
     /// True for forex pairs like `EUR/USD` (FROM/TO direction matters).
-    /// Accepts both `EUR/USD` and Yahoo-style `EURUSD=X` spellings.
+    /// Both legs must be major currencies — this keeps `BTC/USD`, `ETH/USD`
+    /// and `XAU/USD` out (crypto/commodity crosses, not FX). Accepts both
+    /// `EUR/USD` and Yahoo-style `EURUSD=X` spellings.
     #[must_use]
     pub fn is_forex_symbol(symbol: &str) -> bool {
         let clean = symbol.trim().to_uppercase();
         if clean.contains('/') {
             let parts: Vec<&str> = clean.split('/').collect();
-            if parts.len() == 2 && parts[0].len() == 3 && parts[1].len() == 3 {
-                return true;
+            if parts.len() == 2 {
+                return Self::is_currency(parts[0]) && Self::is_currency(parts[1]);
             }
-            // Still treat slash pairs as forex for synthetic fallback.
-            return parts.len() == 2;
+            return false;
         }
         if let Some(stripped) = clean.strip_suffix("=X") {
-            return stripped.len() == 6;
+            if stripped.len() == 6 {
+                return Self::is_currency(&stripped[0..3]) && Self::is_currency(&stripped[3..6]);
+            }
+            // `USD`-quoted singles like `JPY=X` (i.e. USD/JPY) are FX.
+            if stripped.len() == 3 {
+                return Self::is_currency(stripped) && stripped != "USD";
+            }
+            return false;
+        }
+        false
+    }
+
+    /// Bare six-letter codes like `EURUSD` (no slash, no `=X`) with two
+    /// major-currency legs. Routed to Yahoo via `forex_pair_to_yahoo`.
+    #[must_use]
+    pub fn is_bare_forex_code(symbol: &str) -> bool {
+        let clean = symbol.trim().to_uppercase();
+        if clean.len() == 6
+            && clean.chars().all(|c| c.is_ascii_alphabetic())
+            && !clean.contains('/')
+        {
+            return Self::is_currency(&clean[0..3]) && Self::is_currency(&clean[3..6]);
         }
         false
     }
@@ -297,11 +327,71 @@ impl MarketFeed {
         }
     }
 
+    /// Split any accepted forex spelling into (BASE, QUOTE) legs.
+    /// Handles `EUR/USD`, bare `EURUSD`, `EURUSD=X`, and USD-quoted singles
+    /// like `JPY=X` (i.e. USD/JPY). Returns None when legs aren't identifiable.
+    #[must_use]
+    pub fn split_forex_legs(symbol: &str) -> Option<(String, String)> {
+        let clean = symbol.trim().to_uppercase().replace(' ', "");
+        if clean.contains('/') {
+            let parts: Vec<&str> = clean.split('/').collect();
+            if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
+                return Some((parts[0].to_string(), parts[1].to_string()));
+            }
+            return None;
+        }
+        let core = clean.strip_suffix("=X").unwrap_or(&clean);
+        if core.len() == 6 && core.chars().all(|c| c.is_ascii_alphabetic()) {
+            return Some((core[0..3].to_string(), core[3..6].to_string()));
+        }
+        if core.len() == 3 && clean.ends_with("=X") {
+            // `JPY=X` means USD/JPY.
+            return Some(("USD".to_string(), core.to_string()));
+        }
+        None
+    }
+
+    /// Approximate units of a currency per 1 USD (USD itself = 1.0).
+    /// Anchor for direction-aware synthetic forex crosses.
+    #[must_use]
+    pub fn per_usd(code: &str) -> Option<f64> {
+        match code.trim().to_uppercase().as_str() {
+            "USD" => Some(1.0),
+            "EUR" => Some(0.9223),
+            "JPY" => Some(152.40),
+            "GBP" => Some(0.7704),
+            "CHF" => Some(0.8900),
+            "CAD" => Some(1.3600),
+            "AUD" => Some(1.5152),
+            "NZD" => Some(1.6667),
+            "CNY" | "CNH" => Some(7.1250),
+            "HKD" => Some(7.8000),
+            "SGD" => Some(1.3400),
+            "SEK" => Some(10.5000),
+            "NOK" => Some(10.8000),
+            "DKK" => Some(6.9100),
+            "MXN" => Some(17.2000),
+            "ZAR" => Some(18.1000),
+            "KRW" => Some(1350.0),
+            "INR" => Some(83.0000),
+            "BRL" => Some(5.0500),
+            "PLN" => Some(4.0200),
+            _ => None,
+        }
+    }
+
     /// Approximate (base_price, volatility) for synthetic fallback of any symbol.
     /// Keeps forex crosses near realistic magnitudes instead of BTC-default.
     #[must_use]
     pub fn mock_base_for_symbol(symbol: &str) -> (f64, f64) {
         let clean = symbol.trim().to_uppercase();
+        // Crypto first — these are NOT forex even when written `BTC/USD`.
+        match clean.as_str() {
+            "BTC" | "BTC/USD" | "BTC-USD" | "BTCUSD=X" => return (96450.0, 480.0),
+            "ETH" | "ETH/USD" | "ETH-USD" => return (3480.0, 24.0),
+            "SOL" | "SOL/USD" | "SOL-USD" => return (215.0, 3.2),
+            _ => {}
+        }
         // Explicit majors first (fast path, matches old table).
         match clean.as_str() {
             "EUR/USD" | "EURUSD" | "EURUSD=X" => return (1.0845, 0.0018),
@@ -311,52 +401,19 @@ impl MarketFeed {
             "EUR/GBP" | "EURGBP" | "EURGBP=X" => return (0.8355, 0.0012),
             _ => {}
         }
-        // Generic forex cross heuristic by quote currency magnitude.
+        // Generic FROM/TO cross via USD anchor — direction-aware, so JPY/EUR
+        // prices near 0.006 while EUR/JPY prices near 165. Volatility scales
+        // with price; explicit majors above keep their legacy values.
         if Self::is_forex_symbol(&clean) {
-            if clean.contains("JPY") {
-                return (150.0, 0.40);
-            }
-            if clean.contains("KRW") {
-                return (1350.0, 8.0);
-            }
-            if clean.contains("INR") {
-                return (83.0, 0.40);
-            }
-            if clean.contains("HKD") {
-                return (7.80, 0.010);
-            }
-            if clean.contains("CNY") || clean.contains("CNH") {
-                return (7.20, 0.012);
-            }
-            if clean.contains("MXN") {
-                return (17.20, 0.12);
-            }
-            if clean.contains("ZAR") {
-                return (18.10, 0.15);
-            }
-            if clean.contains("BRL") {
-                return (5.05, 0.05);
-            }
-            if clean.contains("SEK") || clean.contains("NOK") {
-                return (10.50, 0.07);
-            }
-            if clean.contains("DKK") {
-                return (7.46, 0.012);
-            }
-            if clean.contains("PLN") {
-                return (4.02, 0.03);
-            }
-            if clean.contains("CHF") {
-                return (0.89, 0.002);
-            }
-            if clean.contains("CAD") {
-                return (1.36, 0.003);
-            }
-            if clean.contains("AUD") || clean.contains("NZD") {
-                return (0.66, 0.002);
-            }
-            if clean.contains("SGD") {
-                return (1.34, 0.003);
+            if let Some((base, quote)) = Self::split_forex_legs(&clean) {
+                if let (Some(per_usd_base), Some(per_usd_quote)) =
+                    (Self::per_usd(&base), Self::per_usd(&quote))
+                {
+                    if per_usd_base > 0.0 {
+                        let px = per_usd_quote / per_usd_base;
+                        return (px, (px * 0.002).max(0.000_004));
+                    }
+                }
             }
             return (1.0800, 0.0025);
         }
@@ -1251,7 +1308,7 @@ impl MarketFeed {
             "BTC/USD" | "BTC" => "BTC-USD".to_string(),
             "ETH/USD" | "ETH" => "ETH-USD".to_string(),
             "SOL/USD" | "SOL" => "SOL-USD".to_string(),
-            _ if Self::is_forex_symbol(&clean) => {
+            _ if Self::is_forex_symbol(&clean) || Self::is_bare_forex_code(&clean) => {
                 let mapped = Self::forex_pair_to_yahoo(&clean);
                 if mapped.is_empty() {
                     return Err(format!("Invalid forex pair (FROM == TO): {symbol}"));

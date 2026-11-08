@@ -24,6 +24,14 @@
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
+## Is this real trading? No. (Read this first)
+
+If you installed this from the repo hoping to trade: **MoneyCraft cannot move real money.** There is no broker connection, no exchange account, no order routing. The trading desk is a **fantasy/paper sandbox** — it simulates fills against delayed or synthetic feeds so you can learn, test ideas, and bankrupt yourself with day trading only *in your imagination* (dark joke, real warning: the habits transfer, the profits don't).
+
+Concretely: `PaperOpen`/`PaperClose` never touch a venue, `PlaceOrder` refuses instead of faking a fill, and every live-data pipe in the building is read-only (Yahoo 15-min delayed, Binance/Hyperledger public klines, ECB daily fixing).
+
+**Going live is a defined, small job, not a rewrite.** The seams already exist: one `Command` enum, one `MarketFeed` abstraction, one set of `Paper*` arms that a broker adapter can replace 1:1. With an hour of Opus or Argon, a forker can wire a real venue behind each asset class and own a genuine little Bloomberg desk. See **[LIVE_TRADING_PLAN.md](LIVE_TRADING_PLAN.md)** for the venue-by-venue scaffold (stocks, forex, sovereign bonds, crypto), the safety rails it demands, and what to wire first.
+
 ## Key Modules & Capabilities
 
 1. **Beginner Personal Wealth & Inflation Erosion Simulator**:
