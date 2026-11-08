@@ -4,16 +4,16 @@
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│               MONEYCRAFT SOVEREIGN TERMINAL v0.6.0                     │
+│               MONEYCRAFT SOVEREIGN TERMINAL v0.7.0                     │
 │                  Control Port: 14117 // Rust egui 0.37                 │
 ├────────────────────────────────────────────────────────────────────────┤
 │ 💶 Personal Wealth & Inflation| Girokonto, Festgeld, Bausparer vs Drag  │
-│ 🌐 Global Indices Desk      | DJIA, SPX, NDX, DAX, Nikkei, KOSPI, FTSE │
+│ 🌐 Global Indices Desk      | DJIA, SPX, NDX, DAX, N225, KOSPI, FTSE…+3 │
 │ 📈 Multi-Asset Comparison   | Normalized % Return Overlays (0.0% Base) │
 │ ⏱️ Date Range Presets       | 1D, 1W, 1M, 3M, YTD, 1Y Presets          │
 │ 📊 Time-Series Terminal     | 🕯️ Candlesticks, Mountain Area, Heikin-Ashi│
 │ 📈 Technical Indicators     | SMA 20, EMA 50, Bollinger Bands, Vol, RSI│
-│ 💱 Forex Desk     | EUR/USD, USD/JPY, GBP/USD, USD/CNY, EUR/GBP│
+│ 💱 Forex Desk     | Any FROM/TO cross of 20 majors (Yahoo 15m)  │
 │ 🔥 Crypto Derivatives Desk  | Hyperliquid Funding Arbitrage & Liq Map  │
 │ 🎮 Fantasy Paper Trading    | 1x–50x Leverage Futures & Spot Sandbox   │
 │ ⚡ Breaking News Wire       | Real-time Macro/FX wire with NLP Sentiment│

@@ -13,11 +13,20 @@ async fn test_moneycraft_status_and_control_port() -> Result<(), Box<dyn std::er
 }
 
 #[tokio::test]
-async fn test_moneycraft_market_feed_and_honeypot_auditor() -> Result<(), Box<dyn std::error::Error>> {
+async fn test_moneycraft_market_feed_and_honeypot_auditor() -> Result<(), Box<dyn std::error::Error>>
+{
     let store = DatabaseStore::open_in_memory()?;
 
     // 1. Market feed query (Synthetic & Real sources)
-    let feed_res = dispatch(Command::GetMarketFeed { symbol: "BTC/USD".to_string(), bar_count: Some(60), source: None }, &store).await;
+    let feed_res = dispatch(
+        Command::GetMarketFeed {
+            symbol: "BTC/USD".to_string(),
+            bar_count: Some(60),
+            source: None,
+        },
+        &store,
+    )
+    .await;
     assert_eq!(feed_res["success"], true);
     let candles = feed_res["candles"].as_array().ok_or("missing candles")?;
     assert!(candles.len() >= 4);
@@ -29,14 +38,42 @@ async fn test_moneycraft_market_feed_and_honeypot_auditor() -> Result<(), Box<dy
     assert!(sources_list.len() >= 9);
 
     // 1c. Binance public live feed test
-    let binance_res = dispatch(Command::GetMarketFeed { symbol: "BTC/USD".to_string(), bar_count: Some(30), source: Some("binance".to_string()) }, &store).await;
+    let binance_res = dispatch(
+        Command::GetMarketFeed {
+            symbol: "BTC/USD".to_string(),
+            bar_count: Some(30),
+            source: Some("binance".to_string()),
+        },
+        &store,
+    )
+    .await;
     assert_eq!(binance_res["success"], true);
-    assert!(binance_res["candles"].as_array().ok_or("missing binance candles")?.len() >= 10);
+    assert!(
+        binance_res["candles"]
+            .as_array()
+            .ok_or("missing binance candles")?
+            .len()
+            >= 10
+    );
 
     // 1d. Yahoo Finance delayed index feed test
-    let yahoo_res = dispatch(Command::GetMarketFeed { symbol: "DJIA".to_string(), bar_count: Some(30), source: Some("yahoo".to_string()) }, &store).await;
+    let yahoo_res = dispatch(
+        Command::GetMarketFeed {
+            symbol: "DJIA".to_string(),
+            bar_count: Some(30),
+            source: Some("yahoo".to_string()),
+        },
+        &store,
+    )
+    .await;
     assert_eq!(yahoo_res["success"], true);
-    assert!(yahoo_res["candles"].as_array().ok_or("missing yahoo candles")?.len() >= 5);
+    assert!(
+        yahoo_res["candles"]
+            .as_array()
+            .ok_or("missing yahoo candles")?
+            .len()
+            >= 5
+    );
 
     // 2. Anti-scam honeypot audit on malicious contract
     let scam_audit = dispatch(
@@ -49,7 +86,12 @@ async fn test_moneycraft_market_feed_and_honeypot_auditor() -> Result<(), Box<dy
     .await;
     assert_eq!(scam_audit["success"], true);
     assert_eq!(scam_audit["report"]["is_honeypot"], true);
-    assert!(scam_audit["report"]["risk_score_0_to_100"].as_u64().unwrap_or(0) > 90);
+    assert!(
+        scam_audit["report"]["risk_score_0_to_100"]
+            .as_u64()
+            .unwrap_or(0)
+            > 90
+    );
 
     // 3. Anti-scam audit on clean contract
     let safe_audit = dispatch(
@@ -92,15 +134,28 @@ async fn test_moneycraft_market_feed_and_honeypot_auditor() -> Result<(), Box<dy
         inflation_run_rate_pct: 3.8,
         simulation_years: 5,
     };
-    let sim_res = dispatch(Command::SimulatePersonalWealth { config: wealth_config }, &store).await;
+    let sim_res = dispatch(
+        Command::SimulatePersonalWealth {
+            config: wealth_config,
+        },
+        &store,
+    )
+    .await;
     assert_eq!(sim_res["success"], true);
     let report = &sim_res["report"];
     assert_eq!(report["current_total_liquid_eur"], 24000.0);
     assert_eq!(report["monthly_free_cashflow_eur"], 500.0); // 2000 - 1400 - 100 bausparer
     assert!(report["net_real_yield_pct"].as_f64().unwrap_or(0.0) < 0.0); // negative real return!
-    let projections = report["projections"].as_array().ok_or("missing projections")?;
+    let projections = report["projections"]
+        .as_array()
+        .ok_or("missing projections")?;
     assert_eq!(projections.len(), 5); // Year 1 to 5
-    assert!(projections[4]["cumulative_inflation_loss_eur"].as_f64().unwrap_or(0.0) > 0.0);
+    assert!(
+        projections[4]["cumulative_inflation_loss_eur"]
+            .as_f64()
+            .unwrap_or(0.0)
+            > 0.0
+    );
 
     Ok(())
 }

@@ -25,17 +25,17 @@ pub const APP_VERSION: &str = "0.7.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersonalWealthConfig {
-    pub monthly_income_eur: f64,        // e.g. 2000.0 EUR
-    pub monthly_living_costs_eur: f64,   // e.g. 1400.0 EUR
-    pub checking_balance_eur: f64,       // Girokonto e.g. 3500.0 EUR (0.0% interest)
-    pub festgeld_principal_eur: f64,     // Festgeld e.g. 15000.0 EUR
-    pub festgeld_interest_rate_pct: f64, // e.g. 3.0%
-    pub festgeld_term_years: f64,        // e.g. 3.0 years
+    pub monthly_income_eur: f64,            // e.g. 2000.0 EUR
+    pub monthly_living_costs_eur: f64,      // e.g. 1400.0 EUR
+    pub checking_balance_eur: f64,          // Girokonto e.g. 3500.0 EUR (0.0% interest)
+    pub festgeld_principal_eur: f64,        // Festgeld e.g. 15000.0 EUR
+    pub festgeld_interest_rate_pct: f64,    // e.g. 3.0%
+    pub festgeld_term_years: f64,           // e.g. 3.0 years
     pub bausparer_monthly_deposit_eur: f64, // Bausparer e.g. 100.0 EUR/mo
-    pub bausparer_balance_eur: f64,      // Current balance e.g. 4800.0 EUR
-    pub bausparer_interest_rate_pct: f64,// e.g. 1.5%
-    pub inflation_run_rate_pct: f64,     // e.g. 3.8%
-    pub simulation_years: usize,         // 1 to 10 years
+    pub bausparer_balance_eur: f64,         // Current balance e.g. 4800.0 EUR
+    pub bausparer_interest_rate_pct: f64,   // e.g. 1.5%
+    pub inflation_run_rate_pct: f64,        // e.g. 3.8%
+    pub simulation_years: usize,            // 1 to 10 years
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,7 +45,7 @@ pub struct WealthYearProjection {
     pub festgeld_nominal_eur: f64,
     pub bausparer_nominal_eur: f64,
     pub total_nominal_wealth_eur: f64,
-    pub total_real_wealth_eur: f64,       // Inflation-discounted purchasing power
+    pub total_real_wealth_eur: f64, // Inflation-discounted purchasing power
     pub cumulative_inflation_loss_eur: f64,
     pub purchasing_power_retention_pct: f64,
     pub monthly_purchasing_power_eur: f64,
@@ -57,7 +57,7 @@ pub struct PersonalWealthReport {
     pub monthly_free_cashflow_eur: f64,
     pub annual_nominal_interest_eur: f64,
     pub annual_inflation_drag_eur: f64,
-    pub net_real_yield_pct: f64,          // (Nominal - Inflation)
+    pub net_real_yield_pct: f64, // (Nominal - Inflation)
     pub years_to_halve_purchasing_power: f64,
     pub projections: Vec<WealthYearProjection>,
     pub inflation_antidotes: Vec<WealthOptimizationTip>,
@@ -75,9 +75,9 @@ pub struct WealthOptimizationTip {
 pub struct PaperPosition {
     pub id: String,
     pub symbol: String,
-    pub side: String, // "LONG" or "SHORT"
+    pub side: String,       // "LONG" or "SHORT"
     pub order_type: String, // "SPOT" or "PERP_FUTURES"
-    pub leverage: f64, // 1.0 to 50.0
+    pub leverage: f64,      // 1.0 to 50.0
     pub quantity: f64,
     pub entry_price: f64,
     pub current_price: f64,
@@ -131,7 +131,7 @@ pub enum Command {
     PaperGetAccount,
     PaperOpenPosition {
         symbol: String,
-        side: String, // "LONG" or "SHORT"
+        side: String,       // "LONG" or "SHORT"
         order_type: String, // "SPOT" or "PERP_FUTURES"
         quantity: f64,
         leverage: f64,
@@ -162,12 +162,16 @@ pub enum Command {
 }
 
 pub fn compute_personal_wealth_projection(cfg: &PersonalWealthConfig) -> PersonalWealthReport {
-    let monthly_savings = (cfg.monthly_income_eur - cfg.monthly_living_costs_eur - cfg.bausparer_monthly_deposit_eur).max(0.0);
-    let current_total = cfg.checking_balance_eur + cfg.festgeld_principal_eur + cfg.bausparer_balance_eur;
-    let annual_interest = (cfg.festgeld_principal_eur * cfg.festgeld_interest_rate_pct / 100.0) 
-                        + (cfg.bausparer_balance_eur * cfg.bausparer_interest_rate_pct / 100.0);
+    let monthly_savings =
+        (cfg.monthly_income_eur - cfg.monthly_living_costs_eur - cfg.bausparer_monthly_deposit_eur)
+            .max(0.0);
+    let current_total =
+        cfg.checking_balance_eur + cfg.festgeld_principal_eur + cfg.bausparer_balance_eur;
+    let annual_interest = (cfg.festgeld_principal_eur * cfg.festgeld_interest_rate_pct / 100.0)
+        + (cfg.bausparer_balance_eur * cfg.bausparer_interest_rate_pct / 100.0);
     let annual_inflation_drag = current_total * (cfg.inflation_run_rate_pct / 100.0);
-    let net_real_yield_pct = ((annual_interest - annual_inflation_drag) / current_total.max(1.0)) * 100.0;
+    let net_real_yield_pct =
+        ((annual_interest - annual_inflation_drag) / current_total.max(1.0)) * 100.0;
 
     let years_to_halve = if cfg.inflation_run_rate_pct > 0.0 {
         72.0 / cfg.inflation_run_rate_pct
@@ -190,7 +194,8 @@ pub fn compute_personal_wealth_projection(cfg: &PersonalWealthConfig) -> Persona
         cur_festgeld *= 1.0 + (cfg.festgeld_interest_rate_pct / 100.0);
 
         // Bausparer adds monthly deposits + 1.5% interest
-        cur_bausparer = (cur_bausparer + cfg.bausparer_monthly_deposit_eur * 12.0) * (1.0 + cfg.bausparer_interest_rate_pct / 100.0);
+        cur_bausparer = (cur_bausparer + cfg.bausparer_monthly_deposit_eur * 12.0)
+            * (1.0 + cfg.bausparer_interest_rate_pct / 100.0);
 
         let total_nominal = cur_checking + cur_festgeld + cur_bausparer;
 
@@ -314,7 +319,11 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
                 "report": report
             })
         }
-        Command::GetMarketFeed { symbol, bar_count, source } => {
+        Command::GetMarketFeed {
+            symbol,
+            bar_count,
+            source,
+        } => {
             let count = bar_count.unwrap_or(60);
             let src = source.as_deref().unwrap_or("synthetic");
             let fetch_res = MarketFeed::fetch_candles_with_source(&symbol, count, src).await;
@@ -333,7 +342,11 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
                 "is_live": fetch_res.is_live,
             })
         }
-        Command::GetMultiSymbolFeed { symbols, bar_count, source } => {
+        Command::GetMultiSymbolFeed {
+            symbols,
+            bar_count,
+            source,
+        } => {
             let count = bar_count.unwrap_or(60);
             let src = source.as_deref().unwrap_or("synthetic");
             let mut series = Vec::new();
@@ -344,7 +357,8 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
                 let first_close = fetch_res.candles.first().map(|c| c.close).unwrap_or(1.0);
 
                 // Normalized percentage returns: ((price - p0) / p0) * 100
-                let normalized_returns: Vec<f64> = fetch_res.candles
+                let normalized_returns: Vec<f64> = fetch_res
+                    .candles
                     .iter()
                     .map(|c| ((c.close - first_close) / first_close) * 100.0)
                     .collect();
@@ -467,7 +481,14 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
                 }
             })
         }
-        Command::PaperOpenPosition { symbol, side, order_type, quantity, leverage, price } => {
+        Command::PaperOpenPosition {
+            symbol,
+            side,
+            order_type,
+            quantity,
+            leverage,
+            price,
+        } => {
             let candles = MarketFeed::mock_candles(&symbol);
             let summary = MarketFeed::summarize_ticker(&symbol, &candles);
             let fill_price = price.unwrap_or(summary.current_price);
@@ -482,7 +503,13 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
             };
 
             let pos = PaperPosition {
-                id: format!("POS-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)),
+                id: format!(
+                    "POS-{}",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0)
+                ),
                 symbol: symbol.clone(),
                 side: side.to_uppercase(),
                 order_type,
@@ -519,103 +546,112 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
                 "initial_balance": bal
             })
         }
-        Command::RunAiWorkflow { workflow_type, prompt, target_asset } => {
-            match workflow_type.to_uppercase().as_str() {
-                "STRATEGY_GEN" => {
-                    json!({
-                        "success": true,
-                        "workflow": "BQuant Strategy Generation",
-                        "target_asset": target_asset,
-                        "status": "compiled",
-                        "generated_code": format!(
-                            "# MoneyCraft Vectorized Strategy for {target_asset}\n\
-                            # Objective: {prompt}\n\
-                            import numpy as np\n\
-                            import pandas as pd\n\n\
-                            def compute_alpha_signals(df: pd.DataFrame):\n\
-                                df['sma20'] = df['close'].rolling(20).mean()\n\
-                                df['std20'] = df['close'].rolling(20).std()\n\
-                                df['z_score'] = (df['close'] - df['sma20']) / df['std20']\n\
-                                df['signal'] = np.where(df['z_score'] < -2.0, 1.0, np.where(df['z_score'] > 2.0, -1.0, 0.0))\n\
-                                return df\n"
-                        ),
-                        "estimated_annual_sharpe": 2.14,
-                        "max_drawdown_pct": 6.8,
-                        "win_rate_pct": 64.2
-                    })
-                }
-                "STRESS_TEST" => {
-                    json!({
-                        "success": true,
-                        "workflow": "Agentic Macro Stress-Testing (PORT Enterprise)",
-                        "target_asset": target_asset,
-                        "scenario": prompt,
-                        "projected_portfolio_impact": {
-                            "estimated_pnl_shock_pct": -4.12,
-                            "var_99_1day_usd": 12850.0,
-                            "volatility_regime_shift": "Moderate-to-High (+18.4% VIX equivalent)",
-                            "most_vulnerable_positions": [
-                                {"asset": "EUR/USD", "factor_beta": 1.45, "downside_risk": "High if Fed cuts slower than ECB"},
-                                {"asset": "USD/JPY", "factor_beta": -1.82, "downside_risk": "Carry unwind on BOJ hike"},
-                                {"asset": "KOSPI", "factor_beta": 1.62, "downside_risk": "Tech export sensitivity to trade tariffs"}
-                            ],
-                            "hedging_recommendation": "Long XAU/USD hedge + delta-neutral FX strangle on USD/JPY"
-                        }
-                    })
-                }
-                "SENTIMENT_ALPHA" => {
-                    json!({
-                        "success": true,
-                        "workflow": "NLP Sentiment Alpha & Catalyst Scorer",
-                        "target_asset": target_asset,
-                        "analysis": {
-                            "composite_sentiment_score": 0.68,
-                            "semantic_polarity": "Hawkish/Bullish",
-                            "confidence_interval": 0.94,
-                            "key_catalysts": [
-                                "Central Bank liquidity injection verified",
-                                "Corporate guidance upward revision in forward outlook",
-                                "Institutional ETF net positive flow continuation"
-                            ],
-                            "signal_horizon": "1-5 Days",
-                            "suggested_action": "Accredited Overweight"
-                        }
-                    })
-                }
-                "EXECUTION_ROUTER" => {
-                    json!({
-                        "success": true,
-                        "workflow": "Smart Order Routing (SOR) & Liquidity Slice",
-                        "target_asset": target_asset,
-                        "order_slice_plan": {
-                            "strategy": "Adaptive VWAP Slicing",
-                            "sub_orders": 12,
-                            "venue_allocation": [
-                                {"venue": "Primary ECN", "allocation_pct": 45.0, "latency_ms": 1.2},
-                                {"venue": "Dark Liquidity Pool", "allocation_pct": 35.0, "latency_ms": 2.8},
-                                {"venue": "Secondary Dealer Desk", "allocation_pct": 20.0, "latency_ms": 4.1}
-                            ],
-                            "expected_slippage_bps": 0.42,
-                            "market_impact_saving_usd": 1840.0
-                        }
-                    })
-                }
-                _ => {
-                    json!({
-                        "success": false,
-                        "error": format!("Unknown AI workflow: {workflow_type}")
-                    })
-                }
+        Command::RunAiWorkflow {
+            workflow_type,
+            prompt,
+            target_asset,
+        } => match workflow_type.to_uppercase().as_str() {
+            "STRATEGY_GEN" => {
+                json!({
+                    "success": true,
+                    "workflow": "BQuant Strategy Generation",
+                    "target_asset": target_asset,
+                    "status": "compiled",
+                    "generated_code": format!(
+                        "# MoneyCraft Vectorized Strategy for {target_asset}\n\
+                        # Objective: {prompt}\n\
+                        import numpy as np\n\
+                        import pandas as pd\n\n\
+                        def compute_alpha_signals(df: pd.DataFrame):\n\
+                            df['sma20'] = df['close'].rolling(20).mean()\n\
+                            df['std20'] = df['close'].rolling(20).std()\n\
+                            df['z_score'] = (df['close'] - df['sma20']) / df['std20']\n\
+                            df['signal'] = np.where(df['z_score'] < -2.0, 1.0, np.where(df['z_score'] > 2.0, -1.0, 0.0))\n\
+                            return df\n"
+                    ),
+                    "estimated_annual_sharpe": 2.14,
+                    "max_drawdown_pct": 6.8,
+                    "win_rate_pct": 64.2
+                })
             }
-        }
-        Command::AuditContract { contract_address, chain } => {
+            "STRESS_TEST" => {
+                json!({
+                    "success": true,
+                    "workflow": "Agentic Macro Stress-Testing (PORT Enterprise)",
+                    "target_asset": target_asset,
+                    "scenario": prompt,
+                    "projected_portfolio_impact": {
+                        "estimated_pnl_shock_pct": -4.12,
+                        "var_99_1day_usd": 12850.0,
+                        "volatility_regime_shift": "Moderate-to-High (+18.4% VIX equivalent)",
+                        "most_vulnerable_positions": [
+                            {"asset": "EUR/USD", "factor_beta": 1.45, "downside_risk": "High if Fed cuts slower than ECB"},
+                            {"asset": "USD/JPY", "factor_beta": -1.82, "downside_risk": "Carry unwind on BOJ hike"},
+                            {"asset": "KOSPI", "factor_beta": 1.62, "downside_risk": "Tech export sensitivity to trade tariffs"}
+                        ],
+                        "hedging_recommendation": "Long XAU/USD hedge + delta-neutral FX strangle on USD/JPY"
+                    }
+                })
+            }
+            "SENTIMENT_ALPHA" => {
+                json!({
+                    "success": true,
+                    "workflow": "NLP Sentiment Alpha & Catalyst Scorer",
+                    "target_asset": target_asset,
+                    "analysis": {
+                        "composite_sentiment_score": 0.68,
+                        "semantic_polarity": "Hawkish/Bullish",
+                        "confidence_interval": 0.94,
+                        "key_catalysts": [
+                            "Central Bank liquidity injection verified",
+                            "Corporate guidance upward revision in forward outlook",
+                            "Institutional ETF net positive flow continuation"
+                        ],
+                        "signal_horizon": "1-5 Days",
+                        "suggested_action": "Accredited Overweight"
+                    }
+                })
+            }
+            "EXECUTION_ROUTER" => {
+                json!({
+                    "success": true,
+                    "workflow": "Smart Order Routing (SOR) & Liquidity Slice",
+                    "target_asset": target_asset,
+                    "order_slice_plan": {
+                        "strategy": "Adaptive VWAP Slicing",
+                        "sub_orders": 12,
+                        "venue_allocation": [
+                            {"venue": "Primary ECN", "allocation_pct": 45.0, "latency_ms": 1.2},
+                            {"venue": "Dark Liquidity Pool", "allocation_pct": 35.0, "latency_ms": 2.8},
+                            {"venue": "Secondary Dealer Desk", "allocation_pct": 20.0, "latency_ms": 4.1}
+                        ],
+                        "expected_slippage_bps": 0.42,
+                        "market_impact_saving_usd": 1840.0
+                    }
+                })
+            }
+            _ => {
+                json!({
+                    "success": false,
+                    "error": format!("Unknown AI workflow: {workflow_type}")
+                })
+            }
+        },
+        Command::AuditContract {
+            contract_address,
+            chain,
+        } => {
             let report = MarketFeed::audit_contract(&contract_address, &chain);
             json!({
                 "success": true,
                 "report": report
             })
         }
-        Command::RunBacktest { strategy, symbol, initial_capital } => {
+        Command::RunBacktest {
+            strategy,
+            symbol,
+            initial_capital,
+        } => {
             let roi = 38.6;
             let final_cap = initial_capital * (1.0 + roi / 100.0);
             json!({
@@ -632,7 +668,12 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
                 "trades_count": 142
             })
         }
-        Command::PlaceOrder { symbol, side, quantity, price } => {
+        Command::PlaceOrder {
+            symbol,
+            side,
+            quantity,
+            price,
+        } => {
             let fill_price = price.unwrap_or(96400.0);
             json!({
                 "success": true,

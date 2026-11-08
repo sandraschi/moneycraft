@@ -112,15 +112,42 @@ fn main() {
             println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
         }
         Some(Commands::Ticker { symbol, source }) => {
-            let res = rt.block_on(dispatch(Command::GetMarketFeed { symbol, bar_count: Some(60), source: Some(source) }, &store));
+            let res = rt.block_on(dispatch(
+                Command::GetMarketFeed {
+                    symbol,
+                    bar_count: Some(60),
+                    source: Some(source),
+                },
+                &store,
+            ));
             println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
         }
         Some(Commands::Audit { address, chain }) => {
-            let res = rt.block_on(dispatch(Command::AuditContract { contract_address: address, chain }, &store));
-            println!("{}", serde_json::to_string_pretty(&res["report"]).unwrap_or_default());
+            let res = rt.block_on(dispatch(
+                Command::AuditContract {
+                    contract_address: address,
+                    chain,
+                },
+                &store,
+            ));
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&res["report"]).unwrap_or_default()
+            );
         }
-        Some(Commands::Backtest { strategy, symbol, capital }) => {
-            let res = rt.block_on(dispatch(Command::RunBacktest { strategy, symbol, initial_capital: capital }, &store));
+        Some(Commands::Backtest {
+            strategy,
+            symbol,
+            capital,
+        }) => {
+            let res = rt.block_on(dispatch(
+                Command::RunBacktest {
+                    strategy,
+                    symbol,
+                    initial_capital: capital,
+                },
+                &store,
+            ));
             println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
         }
         Some(Commands::Portfolio) => {
@@ -161,7 +188,10 @@ fn main() {
                 inflation_run_rate_pct: inflation,
                 simulation_years: years,
             };
-            let res = rt.block_on(dispatch(Command::SimulatePersonalWealth { config: cfg }, &store));
+            let res = rt.block_on(dispatch(
+                Command::SimulatePersonalWealth { config: cfg },
+                &store,
+            ));
             println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
         }
         None => {
@@ -280,44 +310,85 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
 
                 let tool_res = match tool_name {
                     "finance_status" => rt.block_on(dispatch(Command::Status, store)),
-                    "finance_list_data_sources" => rt.block_on(dispatch(Command::ListDataSources, store)),
+                    "finance_list_data_sources" => {
+                        rt.block_on(dispatch(Command::ListDataSources, store))
+                    }
                     "finance_ticker" => {
                         let sym = args["symbol"].as_str().unwrap_or("BTC/USD").to_string();
                         let bars = args["bar_count"].as_u64().map(|b| b as usize);
                         let src = args["source"].as_str().map(|s| s.to_string());
-                        rt.block_on(dispatch(Command::GetMarketFeed { symbol: sym, bar_count: bars, source: src }, store))
+                        rt.block_on(dispatch(
+                            Command::GetMarketFeed {
+                                symbol: sym,
+                                bar_count: bars,
+                                source: src,
+                            },
+                            store,
+                        ))
                     }
                     "finance_audit_contract" => {
                         let addr = args["address"].as_str().unwrap_or("").to_string();
                         let ch = args["chain"].as_str().unwrap_or("Ethereum").to_string();
-                        rt.block_on(dispatch(Command::AuditContract { contract_address: addr, chain: ch }, store))
+                        rt.block_on(dispatch(
+                            Command::AuditContract {
+                                contract_address: addr,
+                                chain: ch,
+                            },
+                            store,
+                        ))
                     }
                     "finance_backtest" => {
                         let strat = args["strategy"].as_str().unwrap_or("Momentum").to_string();
                         let sym = args["symbol"].as_str().unwrap_or("BTC").to_string();
                         let cap = args["capital"].as_f64().unwrap_or(10000.0);
-                        rt.block_on(dispatch(Command::RunBacktest { strategy: strat, symbol: sym, initial_capital: cap }, store))
+                        rt.block_on(dispatch(
+                            Command::RunBacktest {
+                                strategy: strat,
+                                symbol: sym,
+                                initial_capital: cap,
+                            },
+                            store,
+                        ))
                     }
                     "finance_portfolio" => rt.block_on(dispatch(Command::PortfolioSummary, store)),
-                    "finance_historic_panics" => rt.block_on(dispatch(Command::GetHistoricPanics, store)),
-                    "finance_historic_instruments" => rt.block_on(dispatch(Command::GetHistoricInstruments, store)),
+                    "finance_historic_panics" => {
+                        rt.block_on(dispatch(Command::GetHistoricPanics, store))
+                    }
+                    "finance_historic_instruments" => {
+                        rt.block_on(dispatch(Command::GetHistoricInstruments, store))
+                    }
                     "finance_simulate_personal_wealth" => {
                         let cfg = moneycraft_core::PersonalWealthConfig {
                             monthly_income_eur: args["income"].as_f64().unwrap_or(2000.0),
-                            monthly_living_costs_eur: args["living_costs"].as_f64().unwrap_or(1400.0),
+                            monthly_living_costs_eur: args["living_costs"]
+                                .as_f64()
+                                .unwrap_or(1400.0),
                             checking_balance_eur: args["checking"].as_f64().unwrap_or(4000.0),
                             festgeld_principal_eur: args["festgeld"].as_f64().unwrap_or(15000.0),
-                            festgeld_interest_rate_pct: args["festgeld_interest"].as_f64().unwrap_or(3.0),
+                            festgeld_interest_rate_pct: args["festgeld_interest"]
+                                .as_f64()
+                                .unwrap_or(3.0),
                             festgeld_term_years: args["festgeld_term"].as_f64().unwrap_or(3.0),
-                            bausparer_monthly_deposit_eur: args["bausparer_monthly"].as_f64().unwrap_or(100.0),
-                            bausparer_balance_eur: args["bausparer_balance"].as_f64().unwrap_or(5000.0),
-                            bausparer_interest_rate_pct: args["bausparer_interest"].as_f64().unwrap_or(1.5),
+                            bausparer_monthly_deposit_eur: args["bausparer_monthly"]
+                                .as_f64()
+                                .unwrap_or(100.0),
+                            bausparer_balance_eur: args["bausparer_balance"]
+                                .as_f64()
+                                .unwrap_or(5000.0),
+                            bausparer_interest_rate_pct: args["bausparer_interest"]
+                                .as_f64()
+                                .unwrap_or(1.5),
                             inflation_run_rate_pct: args["inflation"].as_f64().unwrap_or(3.8),
                             simulation_years: args["years"].as_u64().unwrap_or(5) as usize,
                         };
-                        rt.block_on(dispatch(Command::SimulatePersonalWealth { config: cfg }, store))
+                        rt.block_on(dispatch(
+                            Command::SimulatePersonalWealth { config: cfg },
+                            store,
+                        ))
                     }
-                    unknown => json!({ "success": false, "error": format!("Unknown tool '{unknown}'") })
+                    unknown => {
+                        json!({ "success": false, "error": format!("Unknown tool '{unknown}'") })
+                    }
                 };
 
                 json!({
@@ -326,10 +397,12 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
                     "result": { "content": [{ "type": "text", "text": tool_res.to_string() }] }
                 })
             }
-            _ => json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32601, "message": "Method not found" } })
+            _ => {
+                json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32601, "message": "Method not found" } })
+            }
         };
 
-        let _ = writeln!(stdout, "{}", resp.to_string());
+        let _ = writeln!(stdout, "{resp}");
         let _ = stdout.flush();
     }
 }
