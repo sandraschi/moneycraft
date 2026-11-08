@@ -16,7 +16,7 @@ use tokio::runtime::Runtime;
 
 #[derive(Parser)]
 #[command(name = "moneycraft-cli")]
-#[command(about = "MoneyCraft: Local-First Financial Intelligence & Algorithmic Trading CLI", version = APP_VERSION)]
+#[command(about = "MoneyCraft: Local-First Financial Intelligence terminal (paper-trading only — no live orders, no real funds)", version = APP_VERSION)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -82,6 +82,58 @@ enum Commands {
         inflation: f64,
         #[arg(long, default_value_t = 5)]
         years: usize,
+    },
+    /// Fetch normalized % overlays for several symbols at once (compare workspace)
+    Compare {
+        /// Symbols, comma-separated (e.g. "DJIA,SPX,KOSPI")
+        symbols: String,
+        #[arg(long, default_value_t = 60)]
+        bars: usize,
+        #[arg(long, default_value = "synthetic")]
+        source: String,
+    },
+    /// Fetch crypto derivatives intel: funding rates + liquidation heatmap (fantasy data, no live venue)
+    Derivatives {
+        #[arg(default_value = "BTC/USD")]
+        symbol: String,
+    },
+    /// Print the breaking-news wire headlines with sentiment tags
+    News,
+    /// Run an agentic quant workflow: STRATEGY_GEN, STRESS_TEST, SENTIMENT_ALPHA, EXECUTION_ROUTER (illustrative templates, no execution)
+    Ai {
+        /// Workflow name
+        workflow: String,
+        #[arg(
+            long,
+            default_value = "momentum breakout with Bollinger mean-reversion"
+        )]
+        prompt: String,
+        #[arg(long, default_value = "BTC/USD")]
+        asset: String,
+    },
+    /// Show the fantasy paper-trading account (demo positions, no real funds)
+    PaperAccount,
+    /// Open a fantasy paper position (1x-50x, sandbox only — never a real order)
+    PaperOpen {
+        #[arg(default_value = "BTC/USD")]
+        symbol: String,
+        #[arg(long, default_value = "LONG")]
+        side: String,
+        #[arg(long, default_value = "PERP_FUTURES")]
+        order_type: String,
+        #[arg(long, default_value_t = 1.0)]
+        quantity: f64,
+        #[arg(long, default_value_t = 10.0)]
+        leverage: f64,
+        #[arg(long)]
+        price: Option<f64>,
+    },
+    /// Close a fantasy paper position by id (stateless demo close)
+    PaperClose { position_id: String },
+    /// Reset the fantasy bankroll (default $100,000, sandbox only)
+    PaperReset {
+        #[arg(long)]
+        balance: Option<f64>,
     },
 }
 
@@ -194,6 +246,93 @@ fn main() {
             ));
             println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
         }
+        Some(Commands::Compare {
+            symbols,
+            bars,
+            source,
+        }) => {
+            let syms: Vec<String> = symbols
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            let res = rt.block_on(dispatch(
+                Command::GetMultiSymbolFeed {
+                    symbols: syms,
+                    bar_count: Some(bars),
+                    source: Some(source),
+                },
+                &store,
+            ));
+            println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
+        }
+        Some(Commands::Derivatives { symbol }) => {
+            let res = rt.block_on(dispatch(
+                Command::GetCryptoDerivativesFeed { symbol },
+                &store,
+            ));
+            println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
+        }
+        Some(Commands::News) => {
+            let res = rt.block_on(dispatch(Command::GetNewsTicker, &store));
+            println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
+        }
+        Some(Commands::Ai {
+            workflow,
+            prompt,
+            asset,
+        }) => {
+            let res = rt.block_on(dispatch(
+                Command::RunAiWorkflow {
+                    workflow_type: workflow,
+                    prompt,
+                    target_asset: asset,
+                },
+                &store,
+            ));
+            println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
+        }
+        Some(Commands::PaperAccount) => {
+            let res = rt.block_on(dispatch(Command::PaperGetAccount, &store));
+            println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
+        }
+        Some(Commands::PaperOpen {
+            symbol,
+            side,
+            order_type,
+            quantity,
+            leverage,
+            price,
+        }) => {
+            let res = rt.block_on(dispatch(
+                Command::PaperOpenPosition {
+                    symbol,
+                    side,
+                    order_type,
+                    quantity,
+                    leverage,
+                    price,
+                },
+                &store,
+            ));
+            println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
+        }
+        Some(Commands::PaperClose { position_id }) => {
+            let res = rt.block_on(dispatch(
+                Command::PaperClosePosition { position_id },
+                &store,
+            ));
+            println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
+        }
+        Some(Commands::PaperReset { balance }) => {
+            let res = rt.block_on(dispatch(
+                Command::PaperResetAccount {
+                    initial_balance: balance,
+                },
+                &store,
+            ));
+            println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
+        }
         None => {
             println!("MoneyCraft CLI v{APP_VERSION} on Port {CONTROL_PORT}");
             println!("Use --help to view available commands or --mcp to start JSON-RPC server.");
@@ -299,6 +438,90 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
                                     "years": { "type": "integer", "description": "Simulation horizon in years (1 to 10)" }
                                 }
                             }
+                        },
+                        {
+                            "name": "finance_compare",
+                            "description": "Fetch normalized percentage-return overlays for several symbols at once (multi-asset compare workspace)",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "symbols": { "type": "array", "items": { "type": "string" }, "description": "Symbols, e.g. [\"DJIA\",\"SPX\",\"KOSPI\"]" },
+                                    "source": { "type": "string" },
+                                    "bar_count": { "type": "integer" }
+                                },
+                                "required": ["symbols"]
+                            }
+                        },
+                        {
+                            "name": "finance_derivatives",
+                            "description": "Fetch crypto derivatives intel: funding rates and liquidation heatmap (illustrative venue data, not live tradable quotes)",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "symbol": { "type": "string" }
+                                },
+                                "required": ["symbol"]
+                            }
+                        },
+                        {
+                            "name": "finance_news",
+                            "description": "Print the breaking-news wire headlines with sentiment tags",
+                            "inputSchema": { "type": "object", "properties": {} }
+                        },
+                        {
+                            "name": "finance_ai_workflow",
+                            "description": "Run an agentic quant workflow: STRATEGY_GEN, STRESS_TEST, SENTIMENT_ALPHA or EXECUTION_ROUTER. Illustrative templates only — EXECUTION_ROUTER plans, never executes.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "workflow_type": { "type": "string" },
+                                    "prompt": { "type": "string" },
+                                    "target_asset": { "type": "string" }
+                                },
+                                "required": ["workflow_type"]
+                            }
+                        },
+                        {
+                            "name": "finance_paper_account",
+                            "description": "Show the fantasy paper-trading account: demo positions, margin, PnL. No real funds, no real orders.",
+                            "inputSchema": { "type": "object", "properties": {} }
+                        },
+                        {
+                            "name": "finance_paper_open",
+                            "description": "Open a fantasy paper position, 1x-50x leverage. Sandbox only — never a real order, nothing leaves this machine.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "symbol": { "type": "string" },
+                                    "side": { "type": "string", "description": "LONG or SHORT" },
+                                    "order_type": { "type": "string", "description": "SPOT or PERP_FUTURES" },
+                                    "quantity": { "type": "number" },
+                                    "leverage": { "type": "number" },
+                                    "price": { "type": "number", "description": "Limit price override; omit for mark price" }
+                                },
+                                "required": ["symbol"]
+                            }
+                        },
+                        {
+                            "name": "finance_paper_close",
+                            "description": "Close a fantasy paper position by id. Stateless demo close — no ledger, no real funds moved.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "position_id": { "type": "string" }
+                                },
+                                "required": ["position_id"]
+                            }
+                        },
+                        {
+                            "name": "finance_paper_reset",
+                            "description": "Reset the fantasy bankroll (default $100,000). Sandbox only.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "initial_balance": { "type": "number" }
+                                }
+                            }
                         }
                     ]
                 }
@@ -383,6 +606,94 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
                         };
                         rt.block_on(dispatch(
                             Command::SimulatePersonalWealth { config: cfg },
+                            store,
+                        ))
+                    }
+                    "finance_compare" => {
+                        let syms: Vec<String> = args["symbols"]
+                            .as_array()
+                            .map(|a| {
+                                a.iter()
+                                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        let bars = args["bar_count"].as_u64().map(|b| b as usize);
+                        let src = args["source"].as_str().map(|s| s.to_string());
+                        rt.block_on(dispatch(
+                            Command::GetMultiSymbolFeed {
+                                symbols: syms,
+                                bar_count: bars,
+                                source: src,
+                            },
+                            store,
+                        ))
+                    }
+                    "finance_derivatives" => {
+                        let sym = args["symbol"].as_str().unwrap_or("BTC/USD").to_string();
+                        rt.block_on(dispatch(
+                            Command::GetCryptoDerivativesFeed { symbol: sym },
+                            store,
+                        ))
+                    }
+                    "finance_news" => rt.block_on(dispatch(Command::GetNewsTicker, store)),
+                    "finance_ai_workflow" => {
+                        let wf = args["workflow_type"]
+                            .as_str()
+                            .unwrap_or("STRATEGY_GEN")
+                            .to_string();
+                        let p = args["prompt"].as_str().unwrap_or("").to_string();
+                        let asset = args["target_asset"]
+                            .as_str()
+                            .unwrap_or("BTC/USD")
+                            .to_string();
+                        rt.block_on(dispatch(
+                            Command::RunAiWorkflow {
+                                workflow_type: wf,
+                                prompt: p,
+                                target_asset: asset,
+                            },
+                            store,
+                        ))
+                    }
+                    "finance_paper_account" => {
+                        rt.block_on(dispatch(Command::PaperGetAccount, store))
+                    }
+                    "finance_paper_open" => {
+                        let sym = args["symbol"].as_str().unwrap_or("BTC/USD").to_string();
+                        let side = args["side"].as_str().unwrap_or("LONG").to_string();
+                        let ot = args["order_type"]
+                            .as_str()
+                            .unwrap_or("PERP_FUTURES")
+                            .to_string();
+                        let qty = args["quantity"].as_f64().unwrap_or(1.0);
+                        let lev = args["leverage"].as_f64().unwrap_or(10.0);
+                        let price = args["price"].as_f64();
+                        rt.block_on(dispatch(
+                            Command::PaperOpenPosition {
+                                symbol: sym,
+                                side,
+                                order_type: ot,
+                                quantity: qty,
+                                leverage: lev,
+                                price,
+                            },
+                            store,
+                        ))
+                    }
+                    "finance_paper_close" => {
+                        let pid = args["position_id"].as_str().unwrap_or("").to_string();
+                        rt.block_on(dispatch(
+                            Command::PaperClosePosition { position_id: pid },
+                            store,
+                        ))
+                    }
+                    "finance_paper_reset" => {
+                        let bal = args["initial_balance"].as_f64();
+                        rt.block_on(dispatch(
+                            Command::PaperResetAccount {
+                                initial_balance: bal,
+                            },
                             store,
                         ))
                     }

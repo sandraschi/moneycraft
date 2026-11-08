@@ -531,11 +531,15 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
             })
         }
         Command::PaperClosePosition { position_id } => {
+            // Stateless demo close: there is no persistent ledger behind this
+            // call, so no realized PnL can be computed. Report 0.0 rather than
+            // the fabricated constant this arm previously returned.
             json!({
                 "success": true,
                 "closed_position_id": position_id,
                 "message": format!("Fantasy position {position_id} closed at mark price"),
-                "pnl_realized_usd": 1240.50
+                "pnl_realized_usd": 0.0,
+                "note": "Stateless demo close — no ledger, no real funds moved."
             })
         }
         Command::PaperResetAccount { initial_balance } => {
@@ -674,17 +678,15 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
             quantity,
             price,
         } => {
-            let fill_price = price.unwrap_or(96400.0);
+            // Honest refusal: this terminal is paper-trading only. There is no
+            // broker connection, so any fill we returned would be fabricated
+            // (a previous stub did exactly that). The fantasy desk lives in the
+            // Paper* commands; live routing is the documented extension point.
+            let _ = (symbol, side, quantity, price);
             json!({
-                "success": true,
-                "order_id": "ORD-2026-X99",
-                "symbol": symbol,
-                "side": side,
-                "quantity": quantity,
-                "fill_price": fill_price,
-                "total_notional": fill_price * quantity,
-                "status": "FILLED",
-                "timestamp_epoch": 1762234000
+                "success": false,
+                "error": "Live order routing is not implemented — MoneyCraft is paper-trading only. Use PaperOpenPosition for the fantasy desk. See README 'Going live' for the extension path.",
+                "hint": "Paper* commands simulate fills against synthetic feeds; nothing leaves this machine."
             })
         }
         Command::PortfolioSummary => {
