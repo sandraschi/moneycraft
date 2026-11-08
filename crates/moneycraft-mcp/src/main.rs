@@ -52,7 +52,7 @@ enum Commands {
         #[arg(long, default_value_t = 10000.0)]
         capital: f64,
     },
-    /// Inspect private local portfolio PnL and active positions
+    /// Real ledger valuation: holdings, unrealized PnL, realized YTD, KESt estimate
     Portfolio,
     /// List historical financial crises and systemic market panics (1720-2026)
     Panics,
@@ -198,6 +198,16 @@ enum Commands {
         source: String,
         #[arg(long)]
         db: Option<String>,
+    },
+    /// List every tradable symbol + the 20 majors (discover what to query)
+    Universe,
+    /// Offline FX math: convert an amount FROM one major TO another (indicative, not tradable)
+    Fx {
+        amount: f64,
+        #[arg(long, default_value = "USD")]
+        from: String,
+        #[arg(long, default_value = "EUR")]
+        to: String,
     },
 }
 
@@ -484,6 +494,14 @@ fn main() {
             ));
             println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
         }
+        Some(Commands::Universe) => {
+            let res = rt.block_on(dispatch(Command::Universe, &store));
+            println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
+        }
+        Some(Commands::Fx { amount, from, to }) => {
+            let res = rt.block_on(dispatch(Command::FxConvert { amount, from, to }, &store));
+            println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
+        }
         None => {
             println!("MoneyCraft CLI v{APP_VERSION} on Port {CONTROL_PORT}");
             println!("Use --help to view available commands or --mcp to start JSON-RPC server.");
@@ -520,7 +538,7 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
                 "id": id,
                 "result": {
                     "protocolVersion": "2024-11-05",
-                    "capabilities": { "tools": {} },
+                    "capabilities": { "tools": {}, "prompts": {} },
                     "serverInfo": { "name": "moneycraft-mcp", "version": APP_VERSION }
                 }
             }),
@@ -569,7 +587,25 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
                                 "required": ["strategy"]
                             }
                         },
-                        { "name": "finance_portfolio", "description": "Inspect private local portfolio PnL and active positions", "inputSchema": { "type": "object", "properties": {} } },
+                        { "name": "finance_portfolio", "description": "Real personal ledger valuation: FIFO holdings, live prices, unrealized PnL, realized YTD, Austrian KESt estimate. Empty ledger yields empty portfolio, never demo numbers.", "inputSchema": { "type": "object", "properties": {} } },
+                        {
+                            "name": "finance_universe",
+                            "description": "List every queryable symbol (indices, stocks, forex, crypto, historic) plus the 20 major currencies. Start here to discover valid tickers.",
+                            "inputSchema": { "type": "object", "properties": {} }
+                        },
+                        {
+                            "name": "finance_fx_convert",
+                            "description": "Offline FX math: convert an amount between major currencies via USD anchor. Indicative synthetic rate, not a tradable quote.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "amount": { "type": "number" },
+                                    "from": { "type": "string", "description": "e.g. USD" },
+                                    "to": { "type": "string", "description": "e.g. EUR" }
+                                },
+                                "required": ["amount", "from", "to"]
+                            }
+                        },
                         { "name": "finance_historic_panics", "description": "List all 19 major historical financial crises and market panics from 1720 South Sea Bubble to modern day", "inputSchema": { "type": "object", "properties": {} } },
                         { "name": "finance_historic_instruments", "description": "List historical London Exchange Alley sovereign papers and equities (EIC, Consols, South Sea)", "inputSchema": { "type": "object", "properties": {} } },
                         {
@@ -806,6 +842,20 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
                         ))
                     }
                     "finance_portfolio" => rt.block_on(dispatch(Command::PortfolioSummary, store)),
+                    "finance_universe" => rt.block_on(dispatch(Command::Universe, store)),
+                    "finance_fx_convert" => {
+                        let amt = args["amount"].as_f64().unwrap_or(0.0);
+                        let from = args["from"].as_str().unwrap_or("").to_string();
+                        let to = args["to"].as_str().unwrap_or("").to_string();
+                        rt.block_on(dispatch(
+                            Command::FxConvert {
+                                amount: amt,
+                                from,
+                                to,
+                            },
+                            store,
+                        ))
+                    }
                     "finance_historic_panics" => {
                         rt.block_on(dispatch(Command::GetHistoricPanics, store))
                     }
@@ -1027,8 +1077,48 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
                     "result": { "content": [{ "type": "text", "text": tool_res.to_string() }] }
                 })
             }
+            "prompts/list" => json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "prompts": [
+                        {
+                            "name": "moneycraft-operator-manual",
+                            "description": "How to use all 25 MoneyCraft tools: discovery order, paper-vs-real boundaries, delay semantics.",
+                            "arguments": []
+                        }
+                    ]
+                }
+            }),
+            "prompts/get" => {
+                let name = req
+                    .get("params")
+                    .and_then(|p| p.get("name"))
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("");
+                if name == "moneycraft-operator-manual" {
+                    json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": {
+                            "description": "MoneyCraft operator manual for agents.",
+                            "messages": [
+                                {
+                                    "role": "user",
+                                    "content": {
+                                        "type": "text",
+                                        "text": "MoneyCraft is a paper-trading terminal. No tool here moves real money — finance_place_order always refuses. Start with finance_universe to discover tickers (indices, 15 stocks, any FROM/TO forex cross of 20 majors, BTC/ETH/SOL quotes). Prices: finance_ticker (yahoo = 15-min delayed default, binance/hyperliquid = live crypto, ecb = daily fixing, synthetic = offline model). Compare baskets with finance_compare, derivatives with finance_derivatives, wire with finance_news. Fantasy desk: finance_paper_account/open/close/reset are stateless demo calls. Real books: finance_ledger_add/holdings/transactions/import/valuation backed by moneycraft-ledger.db (FIFO lots, SELL without lots refused, crypto refused, KESt 27.5% estimate labeled estimate). finance_fx_convert is offline indicative math. finance_universe lists everything queryable. Delays are labeled on every response; synthetic fallbacks say so. Never present delayed, synthetic, or demo numbers as live tradable quotes."
+                                    }
+                                }
+                            ]
+                        }
+                    })
+                } else {
+                    json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32602, "message": format!("Unknown prompt '{name}'")}})
+                }
+            }
             _ => {
-                json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32601, "message": "Method not found" } })
+                json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": "Method not found"}})
             }
         };
 

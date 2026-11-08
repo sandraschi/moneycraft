@@ -190,6 +190,12 @@ pub enum Command {
         source: Option<String>,
         db_path: Option<String>,
     },
+    Universe,
+    FxConvert {
+        amount: f64,
+        from: String,
+        to: String,
+    },
 }
 
 pub fn compute_personal_wealth_projection(cfg: &PersonalWealthConfig) -> PersonalWealthReport {
@@ -787,24 +793,55 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
             }
         }
         Command::PortfolioSummary => {
+            // The legacy hardcoded snapshot is gone: portfolio == ledger valuation.
+            // An empty ledger yields an empty (honest) portfolio, never mannequins.
+            match ledger::open_ledger_db(None) {
+                Err(e) => json!({"success": false, "error": e}),
+                Ok(db) => ledger::valuation(&db, Some("yahoo".to_string()))
+                    .await
+                    .unwrap_or_else(|e| json!({"success": false, "error": e})),
+            }
+        }
+        Command::Universe => {
+            let symbols: Vec<Value> = moneycraft_feed::MarketFeed::available_symbols()
+                .iter()
+                .map(|(s, name, cat)| json!({"symbol": s, "name": name, "class": cat}))
+                .collect();
+            let currencies: Vec<Value> = moneycraft_feed::MarketFeed::major_currencies()
+                .iter()
+                .map(|(c, name)| json!({"code": c, "name": name}))
+                .collect();
             json!({
                 "success": true,
-                "base_currency": "USD",
-                "total_equity_usd": 486240.40,
-                "unrealized_pnl_usd": 48180.12,
-                "realized_pnl_ytd": 92400.00,
-                "estimated_tax_liability": 23100.00,
-                "positions": [
-                    {"symbol": "BTC/USD", "asset_class": "Crypto", "qty": 2.5, "entry_price": 82000.0, "current_price": 96450.0, "pnl_usd": 36125.0},
-                    {"symbol": "DJIA", "asset_class": "Index", "qty": 10.0, "entry_price": 41200.0, "current_price": 42200.0, "pnl_usd": 10000.0},
-                    {"symbol": "KOSPI", "asset_class": "Index", "qty": 80.0, "entry_price": 2510.0, "current_price": 2580.0, "pnl_usd": 5600.0},
-                    {"symbol": "EUR/USD", "asset_class": "Forex", "qty": 100000.0, "entry_price": 1.0780, "current_price": 1.0845, "pnl_usd": 650.0},
-                    {"symbol": "USD/JPY", "asset_class": "Forex", "qty": -50000.0, "entry_price": 153.20, "current_price": 152.40, "pnl_usd": 261.12},
-                    {"symbol": "GBP/USD", "asset_class": "Forex", "qty": 40000.0, "entry_price": 1.2910, "current_price": 1.2980, "pnl_usd": 280.0},
-                    {"symbol": "NVDA", "asset_class": "Equity", "qty": 80.0, "entry_price": 128.0, "current_price": 144.5, "pnl_usd": 1320.0},
-                    {"symbol": "XAU/USD", "asset_class": "Commodity", "qty": 15.0, "entry_price": 2680.0, "current_price": 2745.0, "pnl_usd": 975.0}
-                ]
+                "count": symbols.len(),
+                "symbols": symbols,
+                "currencies": currencies,
+                "note": "Crypto quotes exist in feeds but are refused by the real-asset ledger (fantasy desk only).",
             })
+        }
+        Command::FxConvert { amount, from, to } => {
+            let f = from.trim().to_uppercase();
+            let t = to.trim().to_uppercase();
+            match (
+                moneycraft_feed::MarketFeed::per_usd(&f),
+                moneycraft_feed::MarketFeed::per_usd(&t),
+            ) {
+                (Some(pf), Some(pt)) if pf > 0.0 => {
+                    let rate = pt / pf;
+                    json!({
+                        "success": true,
+                        "amount": amount, "from": f, "to": t,
+                        "rate": rate, "converted": amount * rate,
+                        "basis": "indicative synthetic cross via USD anchor — not a tradable quote.",
+                    })
+                }
+                _ => json!({
+                    "success": false,
+                    "error": format!(
+                        "fx convert refused: unknown currency in {f}/{t}. Expected two of the 20 majors."
+                    ),
+                }),
+            }
         }
     }
 }
