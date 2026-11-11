@@ -40,9 +40,9 @@ Tier 1: Core Engine ──> Tier 2: MCP / CLI ──> Tier 3: Desktop UI ──>
 - [x] Amber ticker ribbons, news wire stream, and multi-asset watchlist.
 
 ### Tier 4 — Craft Menu Bar Standard, Help Suite & Hardened Verification
-- [ ] Universal 8-menu bar (`File`, `Edit`, `View`, `Insert`, `Modify`, `Commands`, `Window`, `Help`) with `switch_on_hover`.
-- [ ] Mandatory 5-dialog Help suite (`Command Palette...`, `Keyboard Shortcuts...`, `Project Files & Docs...`, `Licenses & Notices...`, `About MoneyCraft`).
-- [ ] Fleet UI/UX Pattern 2 adherence: viewport-centric navigation, top button row mapped to View toggles, panel visibility managed via `View` / `Window`.
-- [ ] Tofu Guard verification (100% font glyph coverage, zero tofu placeholder boxes).
-- [ ] Headless `--smoke` parity validation.
+- [x] Universal 8-menu bar (`File`, `Edit`, `View`, `Insert`, `Modify`, `Commands`, `Window`, `Help`) with `switch_on_hover`.
+- [x] Mandatory 5-dialog Help suite (`Command Palette...`, `Keyboard Shortcuts...`, `Project Files & Docs...`, `Licenses & Notices...`, `About MoneyCraft`).
+- [x] Fleet UI/UX Pattern 2 adherence: viewport-centric navigation, top button row mapped to View toggles, panel visibility managed via `View` / `Window`.
+- [x] Tofu Guard verification (100% font glyph coverage, zero tofu placeholder boxes).
+- [x] Headless `--smoke` parity validation.
 - [ ] Standalone release binary packaging and NSIS installer.
