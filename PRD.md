@@ -37,3 +37,21 @@ Commercial financial terminals (Bloomberg, Refinitiv) demand prohibitive annual 
    - Monte Carlo simulation computing Sharpe, Sortino, and Max Drawdown.
 7. **Local Tax & Portfolio Ledger**:
    - Local FIFO/LIFO cost basis accounting.
+
+## 4. UI/UX Architecture & Menu Bar Standard
+
+In accordance with [`CRAFT_MENU_BAR_STANDARD.md`](../mcp-central-docs/standards/rust-artcraft/CRAFT_MENU_BAR_STANDARD.md):
+- **Pattern 2 (Viewport-Centric Craft Workstation):** Persistent financial time-series chart viewport and trading terminal with amber ticker ribbons. Top quick button row acts as accelerators into the `View` menu. To add a new asset desk or indicator panel:
+  1. Register a visibility toggle in the `View` or `Window` menu.
+  2. Add an entry in the sidebar Analytics / Asset toolbox.
+  3. Wire the action directly into the universal `Command::dispatch` bus.
+- **Top Menu Bar Hierarchy:**
+  - `File`: New Portfolio (`Ctrl+N`), Open Ledger (`Ctrl+O`), Open Recent ▸, Save Ledger (`Ctrl+S`), Save As... (`Ctrl+Shift+S`), Export Tax / CSV (`Ctrl+E`), Close Portfolio (`Ctrl+W`), Quit (`Ctrl+Q`).
+  - `Edit`: Undo (`Ctrl+Z`), Redo (`Ctrl+Y`), Cut, Copy, Paste, Preferences (`Ctrl+,`).
+  - `View`: Chart Canvas, Ticker Ribbon, Order Book, News Wire, Backtest Dashboard, Theme (`Dark`/`Light`).
+  - `Insert`: Add Asset Watchlist, Add Transaction, Add Custom Indicator, Add Alert Trigger.
+  - `Modify`: Adjust Timeframe, Edit Position, Recalculate Basis (FIFO/LIFO), Tune Overlay Parameters.
+  - `Commands`: Run Monte Carlo Backtest, Audit Smart Contract Bytecode, Stress Test Portfolio (PORT), Fetch Feed Updates.
+  - `Window`: Reset Layout, Chart Viewport, Portfolio Inspector, Trade Journal, News Terminal.
+  - `Help` (Mandatory 5-Dialog Suite): `Command Palette...` (`Ctrl+K`), `Keyboard Shortcuts...` (`F1`), `Project Files & Docs...`, `Licenses & Notices...`, `About MoneyCraft`.
+- **Behavioral Mechanics:** Smooth `switch_on_hover` between top-level menus, zero-unsafe immediate-mode rendering, and headless `--smoke` parity.

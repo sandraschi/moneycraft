@@ -19,6 +19,13 @@ G10 forex, news wire with NLP sentiment, quant agent workflows (BQuant,
 PORT stress, SOR), EVM honeypot auditor, 10k-path Monte Carlo backtester,
 and a local FIFO/LIFO tax ledger on DatabaseCraft B-Trees.
 
+## Tier mapping
+See [`TIERED_PLAN.md`](TIERED_PLAN.md) for full execution breakdown:
+- Tier 1: Core quant bus, indicators, sandbox EVM, DatabaseCraft B-Tree storage.
+- Tier 2: Headless stdio MCP server (`moneycraft-cli --mcp`) + CLI with paper execution.
+- Tier 3: Immediate-mode `egui` terminal (`moneycraft-app`) with continuous charts and news wire.
+- Tier 4: Craft Menu Bar Standard (`File`, `Edit`, `View`, `Insert`, `Modify`, `Commands`, `Window`, `Help`) with `switch_on_hover`, 5-dialog Help suite, View toggles, Tofu Guard scans, and headless `--smoke` parity.
+
 ## Safety (binding)
 
 MoneyCraft cannot move real money. `PaperOpen`/`PaperClose` simulate fills;
