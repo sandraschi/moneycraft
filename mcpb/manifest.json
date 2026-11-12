@@ -1,0 +1,141 @@
+{
+  "manifest_version": "0.2",
+  "name": "moneycraft",
+  "display_name": "MoneyCraft",
+  "version": "__VERSION__",
+  "description": "MoneyCraft MCP server (27 tools).",
+  "author": {
+    "name": "Sandra Schipal",
+    "url": "https://github.com/sandraschi"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sandraschi/moneycraft"
+  },
+  "license": "MIT",
+  "server": {
+    "type": "binary",
+    "entry_point": "moneycraft-cli.exe",
+    "mcp_config": {
+      "command": "${__dirname}/moneycraft-cli.exe",
+      "args": [
+        "--mcp"
+      ]
+    }
+  },
+  "compatibility": {
+    "platforms": [
+      "win32"
+    ]
+  },
+  "tools": [
+    {
+      "name": "finance_status",
+      "description": "Check MoneyCraft status and quantitative modules"
+    },
+    {
+      "name": "finance_list_data_sources",
+      "description": "List all switchable real and simulated market data sources, latency delays, and Exchange Payola tiers"
+    },
+    {
+      "name": "finance_ticker",
+      "description": "Fetch real-time or delayed candlestick bars and volume for ticker symbol from selected source"
+    },
+    {
+      "name": "finance_audit_contract",
+      "description": "Audit EVM smart contract for honeypots, hidden taxes, and backdoors"
+    },
+    {
+      "name": "finance_backtest",
+      "description": "Run Monte Carlo event-driven algorithmic strategy backtest"
+    },
+    {
+      "name": "finance_portfolio",
+      "description": "Real personal ledger valuation: FIFO holdings, live prices, unrealized PnL, realized YTD, Austrian KESt estimate. Empty ledger yields empty portfolio, never demo numbers."
+    },
+    {
+      "name": "finance_universe",
+      "description": "List every queryable symbol (indices, stocks, forex, crypto, historic) plus the 20 major currencies. Start here to discover valid tickers."
+    },
+    {
+      "name": "finance_fx_convert",
+      "description": "Offline FX math: convert an amount between major currencies via USD anchor. Indicative synthetic rate, not a tradable quote."
+    },
+    {
+      "name": "finance_brokers",
+      "description": "List compiled broker venues, risk limits, and whether any live venue is armed. Paper only until a live adapter ships."
+    },
+    {
+      "name": "finance_broker_place",
+      "description": "Place an order through a broker venue. Only 'paper' exists: validates against venue limits, fills against the synthetic reference price or dry-runs. Unknown venues are refused. No real funds anywhere."
+    },
+    {
+      "name": "finance_historic_panics",
+      "description": "List all 19 major historical financial crises and market panics from 1720 South Sea Bubble to modern day"
+    },
+    {
+      "name": "finance_historic_instruments",
+      "description": "List historical London Exchange Alley sovereign papers and equities (EIC, Consols, South Sea)"
+    },
+    {
+      "name": "finance_simulate_personal_wealth",
+      "description": "Simulate beginner personal wealth compounding across checking, festgeld, and bausparer vs true inflation erosion"
+    },
+    {
+      "name": "finance_compare",
+      "description": "Fetch normalized percentage-return overlays for several symbols at once (multi-asset compare workspace)"
+    },
+    {
+      "name": "finance_derivatives",
+      "description": "Fetch crypto derivatives intel: funding rates and liquidation heatmap (illustrative venue data, not live tradable quotes)"
+    },
+    {
+      "name": "finance_news",
+      "description": "Print the breaking-news wire headlines with sentiment tags"
+    },
+    {
+      "name": "finance_ai_workflow",
+      "description": "Run an agentic quant workflow: STRATEGY_GEN, STRESS_TEST, SENTIMENT_ALPHA or EXECUTION_ROUTER. Illustrative templates only  -  EXECUTION_ROUTER plans, never executes."
+    },
+    {
+      "name": "finance_paper_account",
+      "description": "Show the fantasy paper-trading account: demo positions, margin, PnL. No real funds, no real orders."
+    },
+    {
+      "name": "finance_paper_open",
+      "description": "Open a fantasy paper position, 1x-50x leverage. Sandbox only  -  never a real order, nothing leaves this machine."
+    },
+    {
+      "name": "finance_paper_close",
+      "description": "Close a fantasy paper position by id. Stateless demo close  -  no ledger, no real funds moved."
+    },
+    {
+      "name": "finance_paper_reset",
+      "description": "Reset the fantasy bankroll (default $100,000). Sandbox only."
+    },
+    {
+      "name": "finance_place_order",
+      "description": "Attempt a live order. Always refuses: live routing is not implemented, MoneyCraft is paper-trading only. Use finance_paper_open for the fantasy desk."
+    },
+    {
+      "name": "finance_ledger_add",
+      "description": "Book a real holding into the personal ledger (stocks, ETFs, bonds, cash). Crypto is refused  -  it belongs in the fantasy desk."
+    },
+    {
+      "name": "finance_ledger_holdings",
+      "description": "FIFO holdings with cost basis per symbol (no market prices  -  see finance_ledger_valuation)."
+    },
+    {
+      "name": "finance_ledger_transactions",
+      "description": "Raw ledger bookings, newest first, with optional symbol filter."
+    },
+    {
+      "name": "finance_ledger_import",
+      "description": "Import a broker/bank CSV export (semicolon/comma, UTF-8/cp1252, German or English headers). Reports imported + skipped rows."
+    },
+    {
+      "name": "finance_ledger_valuation",
+      "description": "Full valuation: live prices, unrealized PnL, realized YTD, Austrian KESt estimate (27.5%, estimate only, not tax advice)."
+    }
+  ]
+}
