@@ -1026,11 +1026,30 @@ impl eframe::App for MoneyCraftGui {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         if self.is_dark_theme {
             let mut visuals = egui::Visuals::dark();
+            let ink = Color32::from_rgb(242, 246, 252);
+            visuals.override_text_color = Some(ink);
+            visuals.weak_text_color = Some(Color32::from_rgb(203, 213, 225));
             visuals.panel_fill = Color32::from_rgb(10, 13, 20); // Bloomberg Obsidian
             visuals.window_fill = Color32::from_rgb(8, 10, 16);
+            visuals.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, ink);
+            visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, ink);
+            visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.5, Color32::WHITE);
+            visuals.widgets.active.fg_stroke = egui::Stroke::new(1.5, Color32::WHITE);
             ui.ctx().set_visuals(visuals);
         } else {
-            ui.ctx().set_visuals(egui::Visuals::light());
+            let mut visuals = egui::Visuals::light();
+            let ink = Color32::BLACK;
+            visuals.override_text_color = Some(ink);
+            visuals.weak_text_color = Some(ink);
+            visuals.panel_fill = Color32::WHITE;
+            visuals.window_fill = Color32::WHITE;
+            visuals.extreme_bg_color = Color32::WHITE;
+            visuals.faint_bg_color = Color32::WHITE;
+            visuals.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, ink);
+            visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, ink);
+            visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.5, ink);
+            visuals.widgets.active.fg_stroke = egui::Stroke::new(1.5, ink);
+            ui.ctx().set_visuals(visuals);
         }
 
         let amber = theme_amber(ui); // Classic Bloomberg Orange

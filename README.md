@@ -1,5 +1,10 @@
 # MoneyCraft: Local-First Financial Intelligence & Quantitative Terminal
 
+![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)
+![Rust 1.90+](https://img.shields.io/badge/rust-1.90%2B-orange?logo=rust)
+![MCP stdio](https://img.shields.io/badge/MCP-stdio-purple)
+![ArtCraft harness](https://img.shields.io/badge/ArtCraft-harness-green)
+
 **MoneyCraft** is an offline-first, pure-Rust quantitative finance studio, Bloomberg-grade time-series terminal, and local-first algorithmic workbench for the sandraschi fleet.
 
 ```

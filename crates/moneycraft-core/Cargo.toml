@@ -11,7 +11,12 @@ moneycraft-broker = { path = "../moneycraft-broker" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
 chrono.workspace = true
 databasecraft-store.workspace = true
-databasecraft-core.workspace = true
+web-time = "1"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+chrono = { workspace = true, features = ["wasmbind"] }
+
+[dev-dependencies]
+tokio.workspace = true
