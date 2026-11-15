@@ -850,18 +850,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 
 [[package]]
-name = "databasecraft-core"
-version = "0.5.0"
-dependencies = [
- "chrono",
- "databasecraft-store",
- "serde",
- "serde_json",
- "tokio",
- "uuid",
-]
-
-[[package]]
 name = "databasecraft-store"
 version = "0.5.0"
 dependencies = [
@@ -2199,11 +2187,7 @@ version = "0.7.0"
 dependencies = [
  "databasecraft-store",
  "eframe",
- "egui",
- "moneycraft-core",
- "moneycraft-feed",
- "serde",
- "serde_json",
+ "moneycraft-ui",
  "tokio",
 ]
 
@@ -2221,7 +2205,6 @@ name = "moneycraft-core"
 version = "0.7.0"
 dependencies = [
  "chrono",
- "databasecraft-core",
  "databasecraft-store",
  "moneycraft-broker",
  "moneycraft-feed",
@@ -2229,6 +2212,7 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
+ "web-time",
 ]
 
 [[package]]
@@ -2239,7 +2223,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
- "tokio",
 ]
 
 [[package]]
@@ -2253,6 +2236,34 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "moneycraft-ui"
+version = "0.7.0"
+dependencies = [
+ "databasecraft-store",
+ "eframe",
+ "egui",
+ "moneycraft-core",
+ "moneycraft-feed",
+ "serde",
+ "serde_json",
+ "tokio",
+ "wasm-bindgen-futures",
+]
+
+[[package]]
+name = "moneycraft-web"
+version = "0.7.0"
+dependencies = [
+ "databasecraft-store",
+ "eframe",
+ "log",
+ "moneycraft-ui",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
@@ -4157,7 +4168,6 @@ version = "1.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a0e2d11620c50695fe12bbbfde96b3477fe606e7284c22d505c12ce51214514"
 dependencies = [
- "getrandom 0.4.3",
  "js-sys",
  "serde_core",
  "wasm-bindgen",
