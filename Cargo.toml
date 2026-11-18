@@ -4,7 +4,9 @@ members = [
     "crates/moneycraft-feed",
     "crates/moneycraft-broker",
     "crates/moneycraft-mcp",
+    "crates/moneycraft-ui",
     "crates/moneycraft-app",
+    "apps/moneycraft-web",
 ]
 resolver = "2"
 
