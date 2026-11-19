@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>MoneyCraft</title>
+  <link data-trunk rel="rust" data-bin="moneycraft-web" data-wasm-opt="z" />
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; overscroll-behavior: none; background: #0a0d14; }
+    #moneycraft_canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+    #moneycraft_loading { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      color: #f2f6fc; font: 15px system-ui, sans-serif; pointer-events: none; }
+    @media (prefers-color-scheme: light) {
+      html, body { background: #ffffff; }
+      #moneycraft_loading { color: #000000; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="moneycraft_canvas"></canvas>
+  <div id="moneycraft_loading">Loading MoneyCraft&hellip;</div>
+</body>
+</html>
