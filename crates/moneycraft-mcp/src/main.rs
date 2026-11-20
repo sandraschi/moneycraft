@@ -590,7 +590,7 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
                 "id": id,
                 "result": {
                     "protocolVersion": "2024-11-05",
-                    "capabilities": { "tools": {}, "prompts": {} },
+                    "capabilities": { "tools": {}, "prompts": {}, "resources": {} },
                     "serverInfo": { "name": "moneycraft-mcp", "version": APP_VERSION }
                 }
             }),
@@ -864,6 +864,17 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
                                     "source": { "type": "string", "description": "yahoo (15-min delayed), synthetic, ecb" },
                                     "db": { "type": "string" }
                                 }
+                            }
+                        },
+                        {
+                            "name": "moneycraft_skill_read",
+                            "description": "Read a bundled MoneyCraft skill markdown manual (moneycraft-workflow, moneycraft-ledger).",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "name": { "type": "string", "description": "Skill name, e.g. moneycraft-workflow or moneycraft-ledger" }
+                                },
+                                "required": ["name"]
                             }
                         }
                     ]
@@ -1165,6 +1176,13 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
                             store,
                         ))
                     }
+                    "moneycraft_skill_read" => {
+                        let name = args["name"].as_str().unwrap_or("");
+                        match moneycraft_core::skills::skill_read(name) {
+                            Ok(v) => v,
+                            Err(e) => json!({ "success": false, "error": e }),
+                        }
+                    }
                     unknown => {
                         json!({ "success": false, "error": format!("Unknown tool '{unknown}'") })
                     }
@@ -1175,6 +1193,35 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
                     "id": id,
                     "result": { "content": [{ "type": "text", "text": tool_res.to_string() }] }
                 })
+            }
+            "resources/list" => json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "resources": moneycraft_core::skills::mcp_resources()
+                }
+            }),
+            "resources/read" => {
+                let uri = req
+                    .get("params")
+                    .and_then(|p| p.get("uri"))
+                    .and_then(|u| u.as_str())
+                    .unwrap_or("");
+                if let Some(skill) = moneycraft_core::skills::skill_by_uri(uri) {
+                    json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": {
+                            "contents": [{
+                                "uri": skill.uri,
+                                "mimeType": "text/markdown",
+                                "text": skill.content
+                            }]
+                        }
+                    })
+                } else {
+                    json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32602, "message": format!("Unknown resource '{uri}'")}})
+                }
             }
             "prompts/list" => json!({
                 "jsonrpc": "2.0",

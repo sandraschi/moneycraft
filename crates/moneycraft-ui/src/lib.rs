@@ -1,4 +1,4 @@
-//! MoneyCraft Native Desktop Studio.
+//! MoneyCraft terminal UI, shared by the desktop app and the browser build.
 //!
 //! Visual financial terminal with Bloomberg Terminal grade time-series charting,
 //! Personal Wealth & Savings simulator for beginners (Girokonto, Festgeld, Bausparer, Inflation run-rate erosion),
@@ -21,10 +21,26 @@ use moneycraft_core::{
 };
 use serde_json::Value;
 use std::sync::Arc;
-use tokio::runtime::Runtime;
 
+pub mod bridge;
+mod chat_dock;
 mod tofu_guard;
+pub use bridge::{Bridge, Reply};
+use chat_dock::{ChatContext, ChatDockState};
 use tofu_guard::check_string_for_tofu;
+
+/// Help Center tabs for the standardized Craft Help dialog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelpTab {
+    GettingStarted,
+    Usage,
+    TipsTricks,
+    PitfallsSafety,
+    PlannedExtensions,
+    BundledSkills,
+    ProjectFiles,
+    OtherCrafts,
+}
 
 /// Storytold Craft Menu Bar Standard: Active Modal/Popup Dialogs
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -137,7 +153,7 @@ pub fn theme_purple(ui: &egui::Ui) -> Color32 {
 
 pub struct MoneyCraftGui {
     pub store: Arc<DatabaseStore>,
-    pub runtime: Arc<Runtime>,
+    pub bridge: Bridge,
     pub active_workspace: ActiveWorkspace,
     pub selected_symbol: String,
     pub command_input: String,
@@ -161,7 +177,7 @@ pub struct MoneyCraftGui {
     pub date_preset: DateRangePreset,
     pub custom_bar_count: usize,
     /// Local wheel-zoom window: show last N of the loaded bars (None = all).
-    /// Pure view state — never triggers a refetch; reset on symbol/source/range change.
+    /// Pure view state - never triggers a refetch; reset on symbol/source/range change.
     pub chart_zoom_bars: Option<usize>,
     pub show_sma20: bool,
     pub show_ema50: bool,
@@ -218,6 +234,9 @@ pub struct MoneyCraftGui {
 
     // Storytold Craft Menu Bar Standard: Modal Dialogs & Layout State
     pub active_dialog: Option<ActiveDialog>,
+    pub help_tab: HelpTab,
+    pub selected_skill_idx: usize,
+    pub chat_dock: ChatDockState,
     pub command_palette_query: String,
     pub show_ticker_ribbon: bool,
     pub show_news_wire: bool,
@@ -226,7 +245,7 @@ pub struct MoneyCraftGui {
 }
 
 impl MoneyCraftGui {
-    pub fn new(store: Arc<DatabaseStore>, runtime: Arc<Runtime>) -> Self {
+    pub fn new(bridge: Bridge) -> Self {
         let default_wealth_cfg = PersonalWealthConfig {
             monthly_income_eur: 2000.0,
             monthly_living_costs_eur: 1400.0,
@@ -242,8 +261,8 @@ impl MoneyCraftGui {
         };
 
         let mut app = Self {
-            store,
-            runtime,
+            store: Arc::clone(bridge.store()),
+            bridge,
             active_workspace: ActiveWorkspace::PersonalWealth,
             selected_symbol: "DJIA".to_string(),
             command_input: String::new(),
@@ -285,7 +304,7 @@ impl MoneyCraftGui {
             audit_report: None,
             backtest_result: None,
             portfolio_data: None,
-            status_message: "Yahoo Finance 15m-delayed feed ready (default) — pick indices, stocks, or any forex FROM/TO".to_string(),
+            status_message: "Yahoo Finance 15m-delayed feed ready (default) - pick indices, stocks, or any forex FROM/TO".to_string(),
             is_dark_theme: true,
             show_about_dialog: false,
             show_auth_modal: false,
@@ -294,6 +313,9 @@ impl MoneyCraftGui {
             auth_input_user: "sandra".to_string(),
             auth_input_pass: String::new(),
             active_dialog: None,
+            help_tab: HelpTab::GettingStarted,
+            selected_skill_idx: 0,
+            chat_dock: ChatDockState::default(),
             command_palette_query: String::new(),
             show_ticker_ribbon: true,
             show_news_wire: true,
@@ -318,41 +340,125 @@ impl MoneyCraftGui {
             "Personal wealth & inflation erosion simulation recalculated".to_string();
     }
 
+    /// Run a core command. Its reply is applied by [`Self::apply_reply`]: at once
+    /// on native, on a later frame in the browser.
+    fn send(&mut self, cmd: Command, reply: Reply) {
+        self.bridge.submit(cmd, reply);
+        self.drain_replies();
+    }
+
+    /// Apply every finished command's reply. Runs after each submit and at the
+    /// start of each frame.
+    pub fn drain_replies(&mut self) {
+        for (reply, res) in self.bridge.take_ready() {
+            self.apply_reply(reply, res);
+        }
+    }
+
+    fn apply_reply(&mut self, reply: Reply, res: Value) {
+        match reply {
+            Reply::MarketFeed {
+                symbol,
+                bars,
+                source,
+            } => {
+                // In the browser replies arrive late: drop one the user has
+                // already moved on from (other symbol, range or source).
+                if symbol != self.selected_symbol
+                    || bars != self.custom_bar_count
+                    || source != self.active_data_source
+                {
+                    return;
+                }
+                let note = res["status_note"]
+                    .as_str()
+                    .unwrap_or("Feed updated")
+                    .to_string();
+                self.market_data = Some(res);
+                self.status_message = format!("[{source}] {note} for {symbol} ({bars} bars)");
+            }
+            Reply::Comparison => self.comparison_data = Some(res),
+            Reply::Derivatives => self.derivatives_data = Some(res),
+            Reply::News => self.news_data = Some(res),
+            Reply::PaperAccount => self.paper_account = Some(res),
+            Reply::PaperAction { fallback } => {
+                self.status_message = res["message"].as_str().unwrap_or(fallback).to_string();
+                self.fetch_paper_account();
+            }
+            Reply::AiWorkflow { workflow } => {
+                self.ai_result = Some(res);
+                self.status_message = format!("AI Workflow [{workflow}] completed successfully");
+            }
+            Reply::Audit => {
+                self.audit_report = Some(res);
+                self.status_message = "Sandbox EVM smart-contract audit complete".to_string();
+            }
+            Reply::Backtest => {
+                self.backtest_result = Some(res);
+                self.status_message = "10,000-path Monte Carlo backtest verified".to_string();
+            }
+            Reply::Portfolio => {
+                if res
+                    .get("success")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+                {
+                    self.portfolio_data = Some(res);
+                } else {
+                    // Never fall back to the legacy hardcoded snapshot: show the
+                    // error and the empty-state onboarding instead of mannequins.
+                    let err = res
+                        .get("error")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("ledger unavailable")
+                        .to_string();
+                    self.portfolio_data = Some(serde_json::json!({
+                        "success": true, "count": 0, "positions": [],
+                        "totals_by_currency": {}, "kest_by_currency": {},
+                        "valuation_error": err,
+                    }));
+                }
+            }
+            Reply::ChatQuery { title, snippet } => {
+                let formatted =
+                    serde_json::to_string_pretty(&res).unwrap_or_else(|_| res.to_string());
+                self.chat_dock.push_assistant_reply(
+                    format!("{title}:\n{formatted}"),
+                    snippet.map(str::to_string),
+                );
+            }
+        }
+    }
+
     pub fn fetch_market_feed(&mut self) {
-        // New data → zoom window resets (it is a view over the loaded bars).
+        // New data: the zoom window resets (it is a view over the loaded bars).
         self.chart_zoom_bars = None;
-        let sym = self.selected_symbol.clone();
+        let symbol = self.selected_symbol.clone();
         let bars = self.custom_bar_count;
-        let src = self.active_data_source.clone();
-        let res = self.runtime.block_on(dispatch(
+        let source = self.active_data_source.clone();
+        self.send(
             Command::GetMarketFeed {
-                symbol: sym.clone(),
+                symbol: symbol.clone(),
                 bar_count: Some(bars),
-                source: Some(src.clone()),
+                source: Some(source.clone()),
             },
-            &self.store,
-        ));
-        let note = res["status_note"]
-            .as_str()
-            .unwrap_or("Feed updated")
-            .to_string();
-        self.market_data = Some(res);
-        self.status_message = format!("[{src}] {note} for {sym} ({bars} bars)");
+            Reply::MarketFeed {
+                symbol,
+                bars,
+                source,
+            },
+        );
     }
 
     pub fn fetch_multi_comparison(&mut self) {
-        let syms = self.comparison_symbols.clone();
-        let bars = self.custom_bar_count;
-        let src = self.active_data_source.clone();
-        let res = self.runtime.block_on(dispatch(
+        self.send(
             Command::GetMultiSymbolFeed {
-                symbols: syms,
-                bar_count: Some(bars),
-                source: Some(src),
+                symbols: self.comparison_symbols.clone(),
+                bar_count: Some(self.custom_bar_count),
+                source: Some(self.active_data_source.clone()),
             },
-            &self.store,
-        ));
-        self.comparison_data = Some(res);
+            Reply::Comparison,
+        );
     }
 
     pub fn set_date_preset(&mut self, preset: DateRangePreset) {
@@ -374,168 +480,112 @@ impl MoneyCraftGui {
     }
 
     pub fn fetch_derivatives(&mut self) {
-        let sym = self.selected_symbol.clone();
-        let res = self.runtime.block_on(dispatch(
+        self.send(
             Command::GetCryptoDerivativesFeed {
-                symbol: sym.clone(),
+                symbol: self.selected_symbol.clone(),
             },
-            &self.store,
-        ));
-        self.derivatives_data = Some(res);
+            Reply::Derivatives,
+        );
     }
 
     pub fn fetch_news_ticker(&mut self) {
-        let res = self
-            .runtime
-            .block_on(dispatch(Command::GetNewsTicker, &self.store));
-        self.news_data = Some(res);
+        self.send(Command::GetNewsTicker, Reply::News);
     }
 
     pub fn fetch_paper_account(&mut self) {
-        let res = self
-            .runtime
-            .block_on(dispatch(Command::PaperGetAccount, &self.store));
-        self.paper_account = Some(res);
+        self.send(Command::PaperGetAccount, Reply::PaperAccount);
     }
 
     pub fn open_paper_order(&mut self) {
-        let sym = self.selected_symbol.clone();
-        let side = self.paper_order_side.clone();
-        let ot = self.paper_order_type.clone();
-        let qty = self.paper_quantity;
-        let lev = self.paper_leverage;
-        let res = self.runtime.block_on(dispatch(
+        self.send(
             Command::PaperOpenPosition {
-                symbol: sym,
-                side,
-                order_type: ot,
-                quantity: qty,
-                leverage: lev,
+                symbol: self.selected_symbol.clone(),
+                side: self.paper_order_side.clone(),
+                order_type: self.paper_order_type.clone(),
+                quantity: self.paper_quantity,
+                leverage: self.paper_leverage,
                 price: None,
             },
-            &self.store,
-        ));
-        self.status_message = res["message"]
-            .as_str()
-            .unwrap_or("Fantasy position placed")
-            .to_string();
-        self.fetch_paper_account();
+            Reply::PaperAction {
+                fallback: "Fantasy position placed",
+            },
+        );
     }
 
     pub fn close_paper_position(&mut self, pos_id: &str) {
-        let res = self.runtime.block_on(dispatch(
+        self.send(
             Command::PaperClosePosition {
                 position_id: pos_id.to_string(),
             },
-            &self.store,
-        ));
-        self.status_message = res["message"]
-            .as_str()
-            .unwrap_or("Position closed")
-            .to_string();
-        self.fetch_paper_account();
+            Reply::PaperAction {
+                fallback: "Position closed",
+            },
+        );
     }
 
     pub fn reset_paper_account(&mut self) {
-        let res = self.runtime.block_on(dispatch(
+        self.send(
             Command::PaperResetAccount {
                 initial_balance: Some(100_000.0),
             },
-            &self.store,
-        ));
-        self.status_message = res["message"]
-            .as_str()
-            .unwrap_or("Account reset")
-            .to_string();
-        self.fetch_paper_account();
+            Reply::PaperAction {
+                fallback: "Account reset",
+            },
+        );
     }
 
     pub fn run_ai_workflow(&mut self) {
-        let wf_str = match self.ai_mode {
+        let workflow = match self.ai_mode {
             AiWorkflowMode::StrategyGen => "STRATEGY_GEN",
             AiWorkflowMode::MacroStressTest => "STRESS_TEST",
             AiWorkflowMode::SentimentAlpha => "SENTIMENT_ALPHA",
             AiWorkflowMode::ExecutionRouter => "EXECUTION_ROUTER",
         };
-        let p = self.ai_prompt.clone();
-        let sym = self.selected_symbol.clone();
-        let res = self.runtime.block_on(dispatch(
+        self.send(
             Command::RunAiWorkflow {
-                workflow_type: wf_str.to_string(),
-                prompt: p,
-                target_asset: sym,
+                workflow_type: workflow.to_string(),
+                prompt: self.ai_prompt.clone(),
+                target_asset: self.selected_symbol.clone(),
             },
-            &self.store,
-        ));
-        self.ai_result = Some(res);
-        self.status_message = format!("AI Workflow [{wf_str}] completed successfully");
+            Reply::AiWorkflow { workflow },
+        );
     }
 
     pub fn run_audit(&mut self) {
-        let addr = self.audit_address.clone();
-        let ch = self.audit_chain.clone();
-        let res = self.runtime.block_on(dispatch(
+        self.send(
             Command::AuditContract {
-                contract_address: addr,
-                chain: ch,
+                contract_address: self.audit_address.clone(),
+                chain: self.audit_chain.clone(),
             },
-            &self.store,
-        ));
-        self.audit_report = Some(res);
-        self.status_message = "Sandbox EVM smart-contract audit complete".to_string();
+            Reply::Audit,
+        );
     }
 
     pub fn run_backtest(&mut self) {
-        let strat = self.strategy_name.clone();
-        let sym = self.selected_symbol.clone();
-        let cap = self.initial_capital;
-        let res = self.runtime.block_on(dispatch(
+        self.send(
             Command::RunBacktest {
-                strategy: strat,
-                symbol: sym,
-                initial_capital: cap,
+                strategy: self.strategy_name.clone(),
+                symbol: self.selected_symbol.clone(),
+                initial_capital: self.initial_capital,
             },
-            &self.store,
-        ));
-        self.backtest_result = Some(res);
-        self.status_message = "10,000-path Monte Carlo backtest verified".to_string();
+            Reply::Backtest,
+        );
     }
 
     pub fn fetch_portfolio(&mut self) {
         // Real personal ledger (shared file with the CLI/MCP tools).
-        // Falls back to the legacy static snapshot only if valuation fails.
-        let src = Some(self.active_data_source.clone());
-        let res = self.runtime.block_on(dispatch(
+        self.send(
             Command::LedgerValuation {
-                source: src,
+                source: Some(self.active_data_source.clone()),
                 db_path: None,
             },
-            &self.store,
-        ));
-        if res
-            .get("success")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
-        {
-            self.portfolio_data = Some(res);
-        } else {
-            // Never fall back to the legacy hardcoded snapshot — show the
-            // error and the empty-state onboarding instead of mannequins.
-            let err = res
-                .get("error")
-                .and_then(|v| v.as_str())
-                .unwrap_or("ledger unavailable")
-                .to_string();
-            self.portfolio_data = Some(serde_json::json!({
-                "success": true, "count": 0, "positions": [],
-                "totals_by_currency": {}, "kest_by_currency": {},
-                "valuation_error": err,
-            }));
-        }
+            Reply::Portfolio,
+        );
     }
 
     /// Headless verification (--smoke) without window initialization.
-    pub fn smoke(rt: &Runtime) -> i32 {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn smoke(rt: &tokio::runtime::Runtime) -> i32 {
         let store = match DatabaseStore::open_in_memory() {
             Ok(s) => s,
             Err(e) => {
@@ -578,9 +628,16 @@ impl MoneyCraftGui {
             "Help",
             "Command Palette... (Ctrl+K)",
             "Keyboard Shortcuts... (F1)",
+            "Getting Started...",
+            "Usage (GUI, CLI & MCP)...",
+            "Tips & Tricks...",
+            "Common Pitfalls & Safety...",
+            "Planned Extensions...",
+            "Bundled Skills...",
             "Project Files & Docs...",
             "Licenses & Notices...",
             "About MoneyCraft",
+            "Chat (Ctrl+J)",
             "New Portfolio (Ctrl+N)",
             "Open Ledger... (Ctrl+O)",
             "Save Ledger (Ctrl+S)",
@@ -640,64 +697,227 @@ impl MoneyCraftGui {
                             ui.separator();
 
                             let q = self.command_palette_query.to_lowercase();
-                            let commands: [(&str, &str, &str); 30] = [
-                                ("Commands: Run Monte Carlo Backtest", "Run 10,000-path stochastic volatility backtest", "cmd_backtest"),
-                                ("Commands: Audit Smart Contract Bytecode", "Audit EVM contract bytecode for traps and honeypots", "cmd_audit"),
-                                ("Commands: Stress Test Portfolio (PORT)", "Enterprise macro shock stress testing", "cmd_port"),
-                                ("Commands: Run AI Strategy Generator (BQuant)", "Synthesize BQuant quantitative strategy code", "cmd_bquant"),
-                                ("Commands: Recalculate Wealth Simulation", "Update personal wealth & inflation erosion projection", "cmd_wealth"),
-                                ("Commands: Fetch Market Feed Updates", "Refresh all market time-series feeds and news", "cmd_feed"),
-                                ("Commands: Sync Sovereign Ledger", "Synchronize local DatabaseCraft FIFO/LIFO ledger", "cmd_ledger"),
-                                ("Navigation: Bloomberg Chart Viewport", "Open main financial time-series chart viewport", "nav_terminal"),
-                                ("Navigation: Personal Wealth Simulator", "Beginner personal savings and inflation simulator", "nav_wealth"),
-                                ("Navigation: Sovereign Portfolio Ledger", "Local FIFO/LIFO tax and cost basis ledger", "nav_ledger"),
-                                ("Navigation: Multi-Asset Compare Desk", "Normalized percentage comparison overlays", "nav_multi"),
-                                ("Navigation: Crypto Derivatives & Heatmap", "Hyperliquid funding arbitrage & liquidation heatmap", "nav_crypto"),
-                                ("Navigation: Fantasy Paper Trading Arena", "Leveraged futures and spot paper trading sandbox", "nav_paper"),
-                                ("Navigation: AI Quantitative Workflows", "BQuant strategy generator and macro risk tools", "nav_ai"),
-                                ("Navigation: Smart Contract Honeypot Auditor", "EVM bytecode analysis sandbox", "nav_honeypot"),
-                                ("Navigation: Algorithmic Backtester", "Monte Carlo Sharpe / Sortino backtest dashboard", "nav_backtest"),
-                                ("Navigation: Data Sources & Payola Matrix", "Exchange data tiers, fees, and payola matrix", "nav_sources"),
-                                ("View: Toggle Candlestick Chart", "Render time-series as candlestick bars", "chart_candle"),
-                                ("View: Toggle Mountain Area Chart", "Render time-series as gradient filled area", "chart_mountain"),
-                                ("View: Toggle Heikin-Ashi Chart", "Render time-series as smoothed Heikin-Ashi candles", "chart_heikin"),
-                                ("View: Toggle Dark / Light Theme", "Switch workstation theme palette", "view_theme"),
-                                ("View: Reset Zoom (100%)", "Reset zoom window to all loaded bars", "view_zoom_reset"),
-                                ("Timeframe: 1 Day (1D)", "Set chart timeframe to 1 day", "tf_1d"),
-                                ("Timeframe: 1 Month (1M)", "Set chart timeframe to 1 month", "tf_1m"),
-                                ("Timeframe: 1 Year (1Y)", "Set chart timeframe to 1 year", "tf_1y"),
-                                ("Timeframe: Max (1990+)", "Set chart timeframe to 1990 modern era", "tf_1990"),
-                                ("Help: Keyboard Shortcuts", "Open keyboard shortcuts cheat sheet", "help_shortcuts"),
-                                ("Help: Project Files & Documentation", "Open repository architecture & PRD docs", "help_docs"),
-                                ("Help: Licenses & Notices", "Open third-party licenses and safe Rust declaration", "help_licenses"),
-                                ("Help: About MoneyCraft", "View version, author, and safety guarantees", "help_about"),
+                            let commands: &[(&str, &str, &str)] = &[
+                                (
+                                    "Commands: Run Monte Carlo Backtest",
+                                    "Run 10,000-path stochastic volatility backtest",
+                                    "cmd_backtest",
+                                ),
+                                (
+                                    "Commands: Audit Smart Contract Bytecode",
+                                    "Audit EVM contract bytecode for traps and honeypots",
+                                    "cmd_audit",
+                                ),
+                                (
+                                    "Commands: Stress Test Portfolio (PORT)",
+                                    "Enterprise macro shock stress testing",
+                                    "cmd_port",
+                                ),
+                                (
+                                    "Commands: Run AI Strategy Generator (BQuant)",
+                                    "Synthesize BQuant quantitative strategy code",
+                                    "cmd_bquant",
+                                ),
+                                (
+                                    "Commands: Recalculate Wealth Simulation",
+                                    "Update personal wealth & inflation erosion projection",
+                                    "cmd_wealth",
+                                ),
+                                (
+                                    "Commands: Fetch Market Feed Updates",
+                                    "Refresh all market time-series feeds and news",
+                                    "cmd_feed",
+                                ),
+                                (
+                                    "Commands: Sync Sovereign Ledger",
+                                    "Synchronize local DatabaseCraft FIFO/LIFO ledger",
+                                    "cmd_ledger",
+                                ),
+                                (
+                                    "Navigation: Bloomberg Chart Viewport",
+                                    "Open main financial time-series chart viewport",
+                                    "nav_terminal",
+                                ),
+                                (
+                                    "Navigation: Personal Wealth Simulator",
+                                    "Beginner personal savings and inflation simulator",
+                                    "nav_wealth",
+                                ),
+                                (
+                                    "Navigation: Sovereign Portfolio Ledger",
+                                    "Local FIFO/LIFO tax and cost basis ledger",
+                                    "nav_ledger",
+                                ),
+                                (
+                                    "Navigation: Multi-Asset Compare Desk",
+                                    "Normalized percentage comparison overlays",
+                                    "nav_multi",
+                                ),
+                                (
+                                    "Navigation: Crypto Derivatives & Heatmap",
+                                    "Hyperliquid funding arbitrage & liquidation heatmap",
+                                    "nav_crypto",
+                                ),
+                                (
+                                    "Navigation: Fantasy Paper Trading Arena",
+                                    "Leveraged futures and spot paper trading sandbox",
+                                    "nav_paper",
+                                ),
+                                (
+                                    "Navigation: AI Quantitative Workflows",
+                                    "BQuant strategy generator and macro risk tools",
+                                    "nav_ai",
+                                ),
+                                (
+                                    "Navigation: Smart Contract Honeypot Auditor",
+                                    "EVM bytecode analysis sandbox",
+                                    "nav_honeypot",
+                                ),
+                                (
+                                    "Navigation: Algorithmic Backtester",
+                                    "Monte Carlo Sharpe / Sortino backtest dashboard",
+                                    "nav_backtest",
+                                ),
+                                (
+                                    "Navigation: Data Sources & Payola Matrix",
+                                    "Exchange data tiers, fees, and payola matrix",
+                                    "nav_sources",
+                                ),
+                                (
+                                    "View: Toggle Candlestick Chart",
+                                    "Render time-series as candlestick bars",
+                                    "chart_candle",
+                                ),
+                                (
+                                    "View: Toggle Mountain Area Chart",
+                                    "Render time-series as gradient filled area",
+                                    "chart_mountain",
+                                ),
+                                (
+                                    "View: Toggle Heikin-Ashi Chart",
+                                    "Render time-series as smoothed Heikin-Ashi candles",
+                                    "chart_heikin",
+                                ),
+                                (
+                                    "View: Toggle Dark / Light Theme",
+                                    "Switch workstation theme palette",
+                                    "view_theme",
+                                ),
+                                (
+                                    "View: Reset Zoom (100%)",
+                                    "Reset zoom window to all loaded bars",
+                                    "view_zoom_reset",
+                                ),
+                                (
+                                    "Timeframe: 1 Day (1D)",
+                                    "Set chart timeframe to 1 day",
+                                    "tf_1d",
+                                ),
+                                (
+                                    "Timeframe: 1 Month (1M)",
+                                    "Set chart timeframe to 1 month",
+                                    "tf_1m",
+                                ),
+                                (
+                                    "Timeframe: 1 Year (1Y)",
+                                    "Set chart timeframe to 1 year",
+                                    "tf_1y",
+                                ),
+                                (
+                                    "Timeframe: Max (1990+)",
+                                    "Set chart timeframe to 1990 modern era",
+                                    "tf_1990",
+                                ),
+                                (
+                                    "Help: Keyboard Shortcuts",
+                                    "Open keyboard shortcuts cheat sheet",
+                                    "help_shortcuts",
+                                ),
+                                (
+                                    "Help: Getting Started",
+                                    "Open 5-step first-run tour",
+                                    "help_started",
+                                ),
+                                (
+                                    "Help: Usage (GUI, CLI & MCP)",
+                                    "Open GUI, CLI, and MCP workflows",
+                                    "help_usage",
+                                ),
+                                (
+                                    "Help: Tips & Tricks",
+                                    "Open quantitative workflow tips",
+                                    "help_tips",
+                                ),
+                                (
+                                    "Help: Common Pitfalls & Safety",
+                                    "Open ledger, CSV, and paper-only safety gates",
+                                    "help_pitfalls",
+                                ),
+                                (
+                                    "Help: Planned Extensions",
+                                    "Open roadmap and planned broker adapters",
+                                    "help_planned",
+                                ),
+                                (
+                                    "Help: Bundled Skills",
+                                    "Inspect embedded skills/*/SKILL.md",
+                                    "help_skills",
+                                ),
+                                (
+                                    "Help: Project Files & Documentation",
+                                    "Open repository architecture & HELP.md",
+                                    "help_docs",
+                                ),
+                                (
+                                    "Help: Licenses & Notices",
+                                    "Open third-party licenses and safe Rust declaration",
+                                    "help_licenses",
+                                ),
+                                (
+                                    "Help: About MoneyCraft",
+                                    "View version, author, and safety guarantees",
+                                    "help_about",
+                                ),
+                                (
+                                    "Window: Toggle AI Chat Dock (Ctrl+J)",
+                                    "Open or close local-first offline AI Chat Dock",
+                                    "toggle_chat",
+                                ),
                             ];
 
                             egui::ScrollArea::vertical()
                                 .max_height(280.0)
                                 .show(ui, |ui| {
-                                    for (cmd_name, cmd_desc, action_id) in &commands {
+                                    for (cmd_name, cmd_desc, action_id) in commands {
                                         if q.is_empty()
                                             || cmd_name.to_lowercase().contains(&q)
                                             || cmd_desc.to_lowercase().contains(&q)
                                         {
-                                            if ui.button(egui::RichText::new(*cmd_name).strong()).clicked() {
+                                            if ui
+                                                .button(egui::RichText::new(*cmd_name).strong())
+                                                .clicked()
+                                            {
                                                 match *action_id {
                                                     "cmd_backtest" => {
-                                                        self.active_workspace = ActiveWorkspace::Backtester;
+                                                        self.active_workspace =
+                                                            ActiveWorkspace::Backtester;
                                                         self.run_backtest();
                                                     }
                                                     "cmd_audit" => {
-                                                        self.active_workspace = ActiveWorkspace::HoneypotAuditor;
+                                                        self.active_workspace =
+                                                            ActiveWorkspace::HoneypotAuditor;
                                                         self.run_audit();
                                                     }
                                                     "cmd_port" => {
-                                                        self.active_workspace = ActiveWorkspace::AiWorkflows;
-                                                        self.ai_mode = AiWorkflowMode::MacroStressTest;
+                                                        self.active_workspace =
+                                                            ActiveWorkspace::AiWorkflows;
+                                                        self.ai_mode =
+                                                            AiWorkflowMode::MacroStressTest;
                                                         self.run_ai_workflow();
                                                     }
                                                     "cmd_bquant" => {
-                                                        self.active_workspace = ActiveWorkspace::AiWorkflows;
+                                                        self.active_workspace =
+                                                            ActiveWorkspace::AiWorkflows;
                                                         self.ai_mode = AiWorkflowMode::StrategyGen;
                                                         self.run_ai_workflow();
                                                     }
@@ -714,40 +934,50 @@ impl MoneyCraftGui {
                                                         self.fetch_portfolio();
                                                     }
                                                     "nav_terminal" => {
-                                                        self.active_workspace = ActiveWorkspace::Terminal;
+                                                        self.active_workspace =
+                                                            ActiveWorkspace::Terminal;
                                                         self.fetch_market_feed();
                                                     }
                                                     "nav_wealth" => {
-                                                        self.active_workspace = ActiveWorkspace::PersonalWealth;
+                                                        self.active_workspace =
+                                                            ActiveWorkspace::PersonalWealth;
                                                         self.run_wealth_simulation();
                                                     }
                                                     "nav_ledger" => {
-                                                        self.active_workspace = ActiveWorkspace::PortfolioLedger;
+                                                        self.active_workspace =
+                                                            ActiveWorkspace::PortfolioLedger;
                                                         self.fetch_portfolio();
                                                     }
                                                     "nav_multi" => {
-                                                        self.active_workspace = ActiveWorkspace::MultiComparison;
+                                                        self.active_workspace =
+                                                            ActiveWorkspace::MultiComparison;
                                                         self.fetch_multi_comparison();
                                                     }
                                                     "nav_crypto" => {
-                                                        self.active_workspace = ActiveWorkspace::CryptoDerivatives;
+                                                        self.active_workspace =
+                                                            ActiveWorkspace::CryptoDerivatives;
                                                         self.fetch_derivatives();
                                                     }
                                                     "nav_paper" => {
-                                                        self.active_workspace = ActiveWorkspace::FantasyTrading;
+                                                        self.active_workspace =
+                                                            ActiveWorkspace::FantasyTrading;
                                                         self.fetch_paper_account();
                                                     }
                                                     "nav_ai" => {
-                                                        self.active_workspace = ActiveWorkspace::AiWorkflows;
+                                                        self.active_workspace =
+                                                            ActiveWorkspace::AiWorkflows;
                                                     }
                                                     "nav_honeypot" => {
-                                                        self.active_workspace = ActiveWorkspace::HoneypotAuditor;
+                                                        self.active_workspace =
+                                                            ActiveWorkspace::HoneypotAuditor;
                                                     }
                                                     "nav_backtest" => {
-                                                        self.active_workspace = ActiveWorkspace::Backtester;
+                                                        self.active_workspace =
+                                                            ActiveWorkspace::Backtester;
                                                     }
                                                     "nav_sources" => {
-                                                        self.active_workspace = ActiveWorkspace::DataSources;
+                                                        self.active_workspace =
+                                                            ActiveWorkspace::DataSources;
                                                     }
                                                     "chart_candle" => {
                                                         self.chart_style = ChartStyle::Candlestick;
@@ -768,33 +998,84 @@ impl MoneyCraftGui {
                                                         self.set_date_preset(DateRangePreset::Day1);
                                                     }
                                                     "tf_1m" => {
-                                                        self.set_date_preset(DateRangePreset::Month1);
+                                                        self.set_date_preset(
+                                                            DateRangePreset::Month1,
+                                                        );
                                                     }
                                                     "tf_1y" => {
-                                                        self.set_date_preset(DateRangePreset::Year1);
+                                                        self.set_date_preset(
+                                                            DateRangePreset::Year1,
+                                                        );
                                                     }
                                                     "tf_1990" => {
-                                                        self.set_date_preset(DateRangePreset::Max1990);
+                                                        self.set_date_preset(
+                                                            DateRangePreset::Max1990,
+                                                        );
                                                     }
                                                     "help_shortcuts" => {
-                                                        self.active_dialog = Some(ActiveDialog::KeyboardShortcuts);
+                                                        self.active_dialog =
+                                                            Some(ActiveDialog::KeyboardShortcuts);
+                                                        return;
+                                                    }
+                                                    "help_started" => {
+                                                        self.help_tab = HelpTab::GettingStarted;
+                                                        self.active_dialog =
+                                                            Some(ActiveDialog::ProjectDocs);
+                                                        return;
+                                                    }
+                                                    "help_usage" => {
+                                                        self.help_tab = HelpTab::Usage;
+                                                        self.active_dialog =
+                                                            Some(ActiveDialog::ProjectDocs);
+                                                        return;
+                                                    }
+                                                    "help_tips" => {
+                                                        self.help_tab = HelpTab::TipsTricks;
+                                                        self.active_dialog =
+                                                            Some(ActiveDialog::ProjectDocs);
+                                                        return;
+                                                    }
+                                                    "help_pitfalls" => {
+                                                        self.help_tab = HelpTab::PitfallsSafety;
+                                                        self.active_dialog =
+                                                            Some(ActiveDialog::ProjectDocs);
+                                                        return;
+                                                    }
+                                                    "help_planned" => {
+                                                        self.help_tab = HelpTab::PlannedExtensions;
+                                                        self.active_dialog =
+                                                            Some(ActiveDialog::ProjectDocs);
+                                                        return;
+                                                    }
+                                                    "help_skills" => {
+                                                        self.help_tab = HelpTab::BundledSkills;
+                                                        self.active_dialog =
+                                                            Some(ActiveDialog::ProjectDocs);
                                                         return;
                                                     }
                                                     "help_docs" => {
-                                                        self.active_dialog = Some(ActiveDialog::ProjectDocs);
+                                                        self.help_tab = HelpTab::ProjectFiles;
+                                                        self.active_dialog =
+                                                            Some(ActiveDialog::ProjectDocs);
                                                         return;
                                                     }
+                                                    "toggle_chat" => {
+                                                        self.chat_dock.open = !self.chat_dock.open;
+                                                    }
                                                     "help_licenses" => {
-                                                        self.active_dialog = Some(ActiveDialog::LicensesNotices);
+                                                        self.active_dialog =
+                                                            Some(ActiveDialog::LicensesNotices);
                                                         return;
                                                     }
                                                     "help_about" => {
-                                                        self.active_dialog = Some(ActiveDialog::About);
+                                                        self.active_dialog =
+                                                            Some(ActiveDialog::About);
                                                         return;
                                                     }
                                                     _ => {}
                                                 }
-                                                self.status_message = format!("Executed: {cmd_name}");
+                                                self.status_message =
+                                                    format!("Executed: {cmd_name}");
                                                 self.active_dialog = None;
                                             }
                                             ui.label(
@@ -829,9 +1110,14 @@ impl MoneyCraftGui {
 
                                     let shortcuts = [
                                         ("Ctrl/Cmd + K", "Open Command Palette", "Help"),
-                                        ("Ctrl/Cmd + Shift + P", "Open Command Palette (Alt)", "Help"),
+                                        (
+                                            "Ctrl/Cmd + Shift + P",
+                                            "Open Command Palette (Alt)",
+                                            "Help",
+                                        ),
                                         ("F1", "Open Keyboard Shortcuts", "Help"),
                                         ("Ctrl/Cmd + /", "Open Keyboard Shortcuts (Alt)", "Help"),
+                                        ("Ctrl/Cmd + J", "Toggle Local AI Chat Dock", "Window"),
                                         ("Ctrl/Cmd + ,", "Open Workstation Preferences", "Edit"),
                                         ("Ctrl/Cmd + N", "New Portfolio", "File"),
                                         ("Ctrl/Cmd + O", "Open Sovereign Ledger", "File"),
@@ -849,11 +1135,7 @@ impl MoneyCraftGui {
                                     ];
 
                                     for (sc, name, cat) in &shortcuts {
-                                        ui.label(
-                                            egui::RichText::new(*sc)
-                                                .color(cyan)
-                                                .strong(),
-                                        );
+                                        ui.label(egui::RichText::new(*sc).color(cyan).strong());
                                         ui.label(*name);
                                         ui.label(egui::RichText::new(*cat).weak());
                                         ui.end_row();
@@ -866,53 +1148,164 @@ impl MoneyCraftGui {
                 }
                 ActiveDialog::ProjectDocs => {
                     let mut open = true;
-                    egui::Window::new("Project Files & Documentation")
+                    egui::Window::new("MoneyCraft Help Center & Documentation")
                         .open(&mut open)
                         .collapsible(false)
-                        .resizable(false)
-                        .default_width(520.0)
+                        .resizable(true)
+                        .default_width(720.0)
+                        .default_height(520.0)
                         .show(ctx, |ui| {
-                            ui.heading("MoneyCraft Architecture & Technical Documentation");
-                            ui.label("Located in repo root and mcp-central-docs:");
+                            ui.horizontal_wrapped(|ui| {
+                                let tabs = [
+                                    (HelpTab::GettingStarted, "Get Started"),
+                                    (HelpTab::Usage, "Usage (GUI/CLI/MCP)"),
+                                    (HelpTab::TipsTricks, "Tips & Tricks"),
+                                    (HelpTab::PitfallsSafety, "Pitfalls & Safety"),
+                                    (HelpTab::PlannedExtensions, "Planned Extensions"),
+                                    (HelpTab::BundledSkills, "Bundled Skills"),
+                                    (HelpTab::ProjectFiles, "Project Files & Docs"),
+                                    (HelpTab::OtherCrafts, "Other Crafts"),
+                                ];
+                                for (tab, label) in tabs {
+                                    if ui.selectable_label(self.help_tab == tab, label).clicked() {
+                                        self.help_tab = tab;
+                                    }
+                                }
+                            });
                             ui.separator();
 
-                            let docs = [
-                                (
-                                    "PRD.md",
-                                    "Product Requirements Document, Bloomberg-grade specs, and menu standard",
-                                ),
-                                (
-                                    "TIERED_PLAN.md",
-                                    "4-Tier ArtCraft incremental delivery plan and hardened verification",
-                                ),
-                                (
-                                    "CRAFT_MENU_BAR_STANDARD.md",
-                                    "Storytold Craft App Universal 8-Menu Bar & Command Hierarchy Standard",
-                                ),
-                                (
-                                    "PORTFOLIO_SPEC.md",
-                                    "Sovereign FIFO/LIFO ledger, KESt tax estimation, and DatabaseCraft schema",
-                                ),
-                                (
-                                    "LIVE_TRADING_PLAN.md",
-                                    "Paper trading sandbox, order routing, and capital safety fences",
-                                ),
-                                (
-                                    "SPEC.md",
-                                    "Quantitative mathematics, stochastic volatility, and technical overlays",
-                                ),
-                            ];
-
-                            for (doc_name, doc_desc) in &docs {
-                                ui.group(|ui| {
-                                    ui.label(
-                                        egui::RichText::new(*doc_name)
-                                            .strong()
-                                            .color(cyan),
-                                    );
-                                    ui.label(egui::RichText::new(*doc_desc).small());
+                            egui::ScrollArea::vertical()
+                                .max_height(430.0)
+                                .show(ui, |ui| match self.help_tab {
+                                    HelpTab::GettingStarted => {
+                                        ui.heading("What MoneyCraft Is & 5-Step Get Started");
+                                        ui.label("MoneyCraft is an offline-first, pure-Rust quantitative finance terminal and local FIFO portfolio ledger (paper-only; live_armed: false).");
+                                        ui.add_space(6.0);
+                                        for (step, desc) in [
+                                            ("1. Launch & Inspect Personal Wealth", "MoneyCraft opens in Personal Wealth with Euro cashflow defaults (Girokonto, Festgeld, Bausparer vs. 3.8% inflation) and Rule-of-72 halving horizon."),
+                                            ("2. Switch to Time-Series Terminal", "Click Terminal in the DESKS bar (or View -> Chart Canvas). Pick DJIA, SPX, DAX, KOSPI, or any Yahoo symbol with Candlestick / Heikin-Ashi / Mountain Area and SMA/EMA/BBands/RSI."),
+                                            ("3. Compare Assets on 0.0% Baseline", "Open Multi-Comparison to overlay normalized % returns across disparate price scales."),
+                                            ("4. Book Holdings or Paper Trade", "Use Portfolio Ledger (moneycraft-ledger.db) for real stocks/ETFs/bonds/cash with FIFO lots, or Fantasy Trading for 1x-50x risk-free paper positions."),
+                                            ("5. AI Chat Dock & Command Palette", "Press Ctrl+J for the offline AI Chat Dock, or Ctrl+K / Ctrl+Shift+P for the Command Palette."),
+                                        ] {
+                                            ui.group(|ui| {
+                                                ui.label(egui::RichText::new(step).strong().color(cyan));
+                                                ui.label(desc);
+                                            });
+                                        }
+                                    }
+                                    HelpTab::Usage => {
+                                        ui.heading("Usage: GUI, CLI & MCP (stdio)");
+                                        ui.label(egui::RichText::new("Desktop GUI (moneycraft-app)").strong());
+                                        ui.label("• 8-menu bar with switch_on_hover, Command Palette (Ctrl+K), and Local AI Chat Dock (Ctrl+J).\n• Headless smoke check: cargo run -p moneycraft-app -- --smoke");
+                                        ui.add_space(6.0);
+                                        ui.label(egui::RichText::new("CLI (moneycraft-cli <subcommand>)").strong());
+                                        ui.code("moneycraft-cli status\nmoneycraft-cli universe\nmoneycraft-cli ticker EUR/USD --source yahoo\nmoneycraft-cli compare \"DJIA,SPX,KOSPI\" --bars 60\nmoneycraft-cli ledger-add SAP.DE --side BUY --quantity 10 --price 228 --venue flatex\nmoneycraft-cli ledger-valuation --source yahoo\nmoneycraft-cli broker-place --broker paper AAPL --dry-run");
+                                        ui.add_space(6.0);
+                                        ui.label(egui::RichText::new("MCP 2024-11-05 Server (moneycraft-cli --mcp)").strong());
+                                        ui.label("Exposes 28 tools (finance_status, finance_universe, finance_list_data_sources, finance_ticker, finance_compare, finance_derivatives, finance_news, finance_simulate_personal_wealth, finance_backtest, finance_ai_workflow, finance_audit_contract, finance_fx_convert, finance_brokers, finance_broker_place, finance_paper_*, finance_place_order, finance_ledger_*, finance_portfolio, moneycraft_skill_read) plus resources/list & resources/read.");
+                                    }
+                                    HelpTab::TipsTricks => {
+                                        ui.heading("Tips & Tricks");
+                                        for tip in [
+                                            "• Discover with finance_universe: Call finance_universe first to list supported indices, stocks, 20 major currencies, and historic papers.",
+                                            "• Dry-Run Broker Orders: Pass --dry-run (or dry_run: true in finance_broker_place) to validate venue risk limits without booking.",
+                                            "• Airplane Mode: Switch the feed source to 'synthetic' for zero-latency offline random-walk bars.",
+                                            "• Pure-View Wheel Zoom: Scroll the mouse wheel over the Terminal chart to zoom into the last N bars without triggering a refetch.",
+                                            "• Fast Offline Inspection: Press Ctrl+J and use the quick chips (Status, Universe, Sources, Ledger, Bundled Skills).",
+                                        ] {
+                                            ui.label(tip);
+                                            ui.add_space(3.0);
+                                        }
+                                    }
+                                    HelpTab::PitfallsSafety => {
+                                        ui.heading("Common Pitfalls & Safety Gates");
+                                        for pitfall in [
+                                            "• Ledger Reconciliation & FIFO Lots: SELL exceeding held FIFO lots is refused, never auto-invented. Reconcile partial fills before booking sells.",
+                                            "• Currency & Rounding: Ledger totals are grouped per currency (EUR, USD, etc.) without mixing. finance_fx_convert is indicative offline math only.",
+                                            "• CSV Import Duplicates: finance_ledger_import handles UTF-8/cp1252 and ;/, delimiters, but re-importing the same CSV does not deduplicate rows. Check ledger-transactions first.",
+                                            "• Backup Before Bulk Edits: Copy moneycraft-ledger.db to moneycraft-ledger.db.bak before bulk CSV imports or lot adjustments.",
+                                            "• Paper-Only & Crypto Fence: finance_place_order always refuses; real ledger refuses crypto symbols (keep crypto in Fantasy Trading).",
+                                            "• Feed Delays & KESt: Yahoo is 15-min delayed, ECB is daily; missing quotes return null ('no quote'). KESt 27.5% is an estimate only, not tax advice.",
+                                        ] {
+                                            ui.label(pitfall);
+                                            ui.add_space(3.0);
+                                        }
+                                    }
+                                    HelpTab::PlannedExtensions => {
+                                        ui.heading("Planned Extensions (LIVE_TRADING_PLAN.md)");
+                                        for item in [
+                                            "• Feature-Gated Broker Adapters: broker-oanda (OANDA v20 FX), broker-alpaca (US equities), broker-ibkr (IBKR Client Portal Gateway for stocks, FX, and sovereign bonds), and broker-kraken / Hyperliquid — disabled in default builds.",
+                                            "• Ledger Deduplication: Optional import-hash / idempotency tracking for repeated CSV/OFX statements.",
+                                            "• Layout Persistence: Saving panel/dock visibility preferences across sessions.",
+                                        ] {
+                                            ui.label(item);
+                                            ui.add_space(4.0);
+                                        }
+                                    }
+                                    HelpTab::BundledSkills => {
+                                        ui.heading("Bundled Skills (skills/*/SKILL.md)");
+                                        ui.label("Embedded in moneycraft-core and exposed via MCP resources/list, resources/read, and moneycraft_skill_read:");
+                                        ui.add_space(4.0);
+                                        ui.horizontal_wrapped(|ui| {
+                                            for (idx, skill) in moneycraft_core::skills::SKILLS.iter().enumerate() {
+                                                if ui
+                                                    .selectable_label(self.selected_skill_idx == idx, skill.name)
+                                                    .clicked()
+                                                {
+                                                    self.selected_skill_idx = idx;
+                                                }
+                                            }
+                                        });
+                                        ui.separator();
+                                        if let Some(skill) = moneycraft_core::skills::SKILLS.get(self.selected_skill_idx) {
+                                            ui.label(egui::RichText::new(format!("URI: {}", skill.uri)).small().color(cyan));
+                                            ui.label(egui::RichText::new(skill.description).italics());
+                                            ui.add_space(6.0);
+                                            ui.code(skill.content);
+                                        }
+                                    }
+                                    HelpTab::ProjectFiles => {
+                                        ui.heading("Project Files & Repository Documentation");
+                                        ui.label("Located in repo root (HELP.md is embedded below):");
+                                        ui.separator();
+                                        let docs = [
+                                            ("HELP.md", "Complete workstation manual (embedded below)"),
+                                            ("README.md", "Quick start, workspace overview, and paper-trading posture"),
+                                            ("PRD.md", "Product Requirements Document and Bloomberg-grade specs"),
+                                            ("PORTFOLIO_SPEC.md", "Sovereign FIFO ledger, KESt estimation, and DatabaseCraft schema"),
+                                            ("LIVE_TRADING_PLAN.md", "Broker trait seam, venue matrix, and capital safety rails"),
+                                            ("SPEC.md", "Quantitative mathematics, stochastic volatility, and technical overlays"),
+                                        ];
+                                        for (doc_name, doc_desc) in &docs {
+                                            ui.group(|ui| {
+                                                ui.label(egui::RichText::new(*doc_name).strong().color(cyan));
+                                                ui.label(egui::RichText::new(*doc_desc).small());
+                                            });
+                                        }
+                                        ui.add_space(6.0);
+                                        egui::CollapsingHeader::new("Embedded HELP.md")
+                                            .default_open(false)
+                                            .show(ui, |ui| {
+                                                ui.code(moneycraft_core::skills::HELP_MD);
+                                            });
+                                    }
+                                    HelpTab::OtherCrafts => {
+                                        ui.heading("Other Crafts (Ecosystem & Boundaries)");
+                                        for (craft, desc) in [
+                                            ("databasecraft", "Local SQLite B-Tree storage engine used by moneycraft-core for moneycraft-ledger.db."),
+                                            ("democraft", "Automated demo & verification harness running MoneyCraft --smoke and fixture recipes."),
+                                            ("codercraft", "Codebase engineering & audit studio; never modifies upstream Storytold reference repos."),
+                                            ("calendarcraft", "Local calendar workstation for tax deadlines, Festgeld maturity dates, and reminders."),
+                                            ("taskcraft", "Local task tracker for quarterly portfolio rebalancing and ledger backup checklists."),
+                                        ] {
+                                            ui.group(|ui| {
+                                                ui.label(egui::RichText::new(craft).strong().color(cyan));
+                                                ui.label(desc);
+                                            });
+                                        }
+                                    }
                                 });
-                            }
                         });
                     if !open {
                         self.active_dialog = None;
@@ -984,7 +1377,13 @@ impl MoneyCraftGui {
                             ui.separator();
                             ui.horizontal(|ui| {
                                 ui.label("Interface Theme:");
-                                if ui.selectable_label(self.is_dark_theme, "Dark (Bloomberg Obsidian)").clicked() {
+                                if ui
+                                    .selectable_label(
+                                        self.is_dark_theme,
+                                        "Dark (Bloomberg Obsidian)",
+                                    )
+                                    .clicked()
+                                {
                                     self.is_dark_theme = true;
                                 }
                                 if ui.selectable_label(!self.is_dark_theme, "Light").clicked() {
@@ -999,15 +1398,33 @@ impl MoneyCraftGui {
                             ui.label("Personal Wealth Default Parameters:");
                             ui.horizontal(|ui| {
                                 ui.label("Monthly Net Income (€):");
-                                ui.add(egui::DragValue::new(&mut self.wealth_config.monthly_income_eur).speed(50.0).range(0.0..=100000.0));
+                                ui.add(
+                                    egui::DragValue::new(
+                                        &mut self.wealth_config.monthly_income_eur,
+                                    )
+                                    .speed(50.0)
+                                    .range(0.0..=100000.0),
+                                );
                             });
                             ui.horizontal(|ui| {
                                 ui.label("Monthly Living Costs (€):");
-                                ui.add(egui::DragValue::new(&mut self.wealth_config.monthly_living_costs_eur).speed(50.0).range(0.0..=100000.0));
+                                ui.add(
+                                    egui::DragValue::new(
+                                        &mut self.wealth_config.monthly_living_costs_eur,
+                                    )
+                                    .speed(50.0)
+                                    .range(0.0..=100000.0),
+                                );
                             });
                             ui.horizontal(|ui| {
                                 ui.label("Inflation Run Rate (%):");
-                                ui.add(egui::DragValue::new(&mut self.wealth_config.inflation_run_rate_pct).speed(0.1).range(0.0..=30.0));
+                                ui.add(
+                                    egui::DragValue::new(
+                                        &mut self.wealth_config.inflation_run_rate_pct,
+                                    )
+                                    .speed(0.1)
+                                    .range(0.0..=30.0),
+                                );
                             });
                             if ui.button("Recalculate Wealth Simulation").clicked() {
                                 self.run_wealth_simulation();
@@ -1024,13 +1441,33 @@ impl MoneyCraftGui {
 
 impl eframe::App for MoneyCraftGui {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.drain_replies();
         if self.is_dark_theme {
             let mut visuals = egui::Visuals::dark();
+            let ink = Color32::from_rgb(242, 246, 252);
+            visuals.override_text_color = Some(ink);
+            visuals.weak_text_color = Some(Color32::from_rgb(203, 213, 225));
             visuals.panel_fill = Color32::from_rgb(10, 13, 20); // Bloomberg Obsidian
             visuals.window_fill = Color32::from_rgb(8, 10, 16);
+            visuals.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, ink);
+            visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, ink);
+            visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.5, Color32::WHITE);
+            visuals.widgets.active.fg_stroke = egui::Stroke::new(1.5, Color32::WHITE);
             ui.ctx().set_visuals(visuals);
         } else {
-            ui.ctx().set_visuals(egui::Visuals::light());
+            let mut visuals = egui::Visuals::light();
+            let ink = Color32::BLACK;
+            visuals.override_text_color = Some(ink);
+            visuals.weak_text_color = Some(ink);
+            visuals.panel_fill = Color32::WHITE;
+            visuals.window_fill = Color32::WHITE;
+            visuals.extreme_bg_color = Color32::WHITE;
+            visuals.faint_bg_color = Color32::WHITE;
+            visuals.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, ink);
+            visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, ink);
+            visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.5, ink);
+            visuals.widgets.active.fg_stroke = egui::Stroke::new(1.5, ink);
+            ui.ctx().set_visuals(visuals);
         }
 
         let amber = theme_amber(ui); // Classic Bloomberg Orange
@@ -1054,6 +1491,15 @@ impl eframe::App for MoneyCraftGui {
             // Preferences: Ctrl+,
             if i.modifiers.command && i.key_pressed(egui::Key::Comma) {
                 self.active_dialog = Some(ActiveDialog::Preferences);
+            }
+            // AI Chat Dock: Ctrl+J
+            if i.modifiers.command && !i.modifiers.shift && i.key_pressed(egui::Key::J) {
+                self.chat_dock.open = !self.chat_dock.open;
+                self.status_message = if self.chat_dock.open {
+                    "Window ▸ AI Chat Dock opened".to_string()
+                } else {
+                    "Window ▸ AI Chat Dock closed".to_string()
+                };
             }
             // File: Ctrl+N (New Portfolio)
             if i.modifiers.command && !i.modifiers.shift && i.key_pressed(egui::Key::N) {
@@ -1094,15 +1540,23 @@ impl eframe::App for MoneyCraftGui {
                 self.status_message = "Edit ▸ Redo".to_string();
             }
             // View Zoom shortcuts
-            if i.modifiers.command && (i.key_pressed(egui::Key::Equals) || i.key_pressed(egui::Key::Plus)) {
+            if i.modifiers.command
+                && (i.key_pressed(egui::Key::Equals) || i.key_pressed(egui::Key::Plus))
+            {
                 let cur = self.chart_zoom_bars.unwrap_or(self.custom_bar_count);
                 self.chart_zoom_bars = Some(cur.saturating_sub(10).max(10));
-                self.status_message = format!("View ▸ Zoom In ({} bars)", self.chart_zoom_bars.unwrap_or(self.custom_bar_count));
+                self.status_message = format!(
+                    "View ▸ Zoom In ({} bars)",
+                    self.chart_zoom_bars.unwrap_or(self.custom_bar_count)
+                );
             }
             if i.modifiers.command && i.key_pressed(egui::Key::Minus) {
                 let cur = self.chart_zoom_bars.unwrap_or(self.custom_bar_count);
                 self.chart_zoom_bars = Some((cur + 10).min(self.custom_bar_count));
-                self.status_message = format!("View ▸ Zoom Out ({} bars)", self.chart_zoom_bars.unwrap_or(self.custom_bar_count));
+                self.status_message = format!(
+                    "View ▸ Zoom Out ({} bars)",
+                    self.chart_zoom_bars.unwrap_or(self.custom_bar_count)
+                );
             }
             if i.modifiers.command && i.key_pressed(egui::Key::Num0) {
                 self.chart_zoom_bars = None;
@@ -1131,7 +1585,8 @@ impl eframe::App for MoneyCraftGui {
                             ui.close();
                         }
                         if ui.button("In-Memory Temporary Ledger").clicked() {
-                            self.status_message = "Switched to In-Memory temporary ledger".to_string();
+                            self.status_message =
+                                "Switched to In-Memory temporary ledger".to_string();
                             ui.close();
                         }
                     });
@@ -1201,7 +1656,10 @@ impl eframe::App for MoneyCraftGui {
                         self.fetch_market_feed();
                         ui.close();
                     }
-                    if ui.checkbox(&mut self.show_ticker_ribbon, "Ticker Ribbon").clicked() {
+                    if ui
+                        .checkbox(&mut self.show_ticker_ribbon, "Ticker Ribbon")
+                        .clicked()
+                    {
                         ui.close();
                     }
                     if ui.button("Order Book / Fantasy Desk").clicked() {
@@ -1228,15 +1686,33 @@ impl eframe::App for MoneyCraftGui {
                     }
                     ui.separator();
                     ui.menu_button("Chart Style", |ui| {
-                        if ui.selectable_label(self.chart_style == ChartStyle::Candlestick, "Candlestick").clicked() {
+                        if ui
+                            .selectable_label(
+                                self.chart_style == ChartStyle::Candlestick,
+                                "Candlestick",
+                            )
+                            .clicked()
+                        {
                             self.chart_style = ChartStyle::Candlestick;
                             ui.close();
                         }
-                        if ui.selectable_label(self.chart_style == ChartStyle::MountainArea, "Mountain Area").clicked() {
+                        if ui
+                            .selectable_label(
+                                self.chart_style == ChartStyle::MountainArea,
+                                "Mountain Area",
+                            )
+                            .clicked()
+                        {
                             self.chart_style = ChartStyle::MountainArea;
                             ui.close();
                         }
-                        if ui.selectable_label(self.chart_style == ChartStyle::HeikinAshi, "Heikin-Ashi").clicked() {
+                        if ui
+                            .selectable_label(
+                                self.chart_style == ChartStyle::HeikinAshi,
+                                "Heikin-Ashi",
+                            )
+                            .clicked()
+                        {
                             self.chart_style = ChartStyle::HeikinAshi;
                             ui.close();
                         }
@@ -1266,7 +1742,10 @@ impl eframe::App for MoneyCraftGui {
                     }
                     ui.separator();
                     ui.menu_button("Interface Theme", |ui| {
-                        if ui.selectable_label(self.is_dark_theme, "Dark (Bloomberg Obsidian)").clicked() {
+                        if ui
+                            .selectable_label(self.is_dark_theme, "Dark (Bloomberg Obsidian)")
+                            .clicked()
+                        {
                             self.is_dark_theme = true;
                             ui.close();
                         }
@@ -1281,22 +1760,31 @@ impl eframe::App for MoneyCraftGui {
                 ui.menu_button("Insert", |ui| {
                     if ui.button("Add Asset Watchlist...").clicked() {
                         self.active_workspace = ActiveWorkspace::MultiComparison;
-                        self.status_message = "Insert ▸ Select asset to add to watchlist".to_string();
+                        self.status_message =
+                            "Insert ▸ Select asset to add to watchlist".to_string();
                         ui.close();
                     }
                     if ui.button("Add Transaction...").clicked() {
                         self.active_workspace = ActiveWorkspace::PortfolioLedger;
-                        self.status_message = "Insert ▸ Record transaction in sovereign ledger".to_string();
+                        self.status_message =
+                            "Insert ▸ Record transaction in sovereign ledger".to_string();
                         ui.close();
                     }
                     ui.separator();
-                    if ui.button("Add Custom Indicator (SMA / EMA / BB / RSI)...").clicked() {
+                    if ui
+                        .button("Add Custom Indicator (SMA / EMA / BB / RSI)...")
+                        .clicked()
+                    {
                         self.active_workspace = ActiveWorkspace::Terminal;
-                        self.status_message = "Insert ▸ Configure technical indicator overlays".to_string();
+                        self.status_message =
+                            "Insert ▸ Configure technical indicator overlays".to_string();
                         ui.close();
                     }
                     if ui.button("Add Alert Trigger...").clicked() {
-                        self.status_message = format!("Insert ▸ Alert trigger registered for {}", self.selected_symbol);
+                        self.status_message = format!(
+                            "Insert ▸ Alert trigger registered for {}",
+                            self.selected_symbol
+                        );
                         ui.close();
                     }
                 });
@@ -1348,17 +1836,20 @@ impl eframe::App for MoneyCraftGui {
                     ui.separator();
                     if ui.button("Edit Position...").clicked() {
                         self.active_workspace = ActiveWorkspace::PortfolioLedger;
-                        self.status_message = "Modify ▸ Inspect and edit portfolio position".to_string();
+                        self.status_message =
+                            "Modify ▸ Inspect and edit portfolio position".to_string();
                         ui.close();
                     }
                     if ui.button("Recalculate Basis (FIFO/LIFO)").clicked() {
                         self.fetch_portfolio();
-                        self.status_message = "Modify ▸ Cost basis recalculated via FIFO/LIFO engine".to_string();
+                        self.status_message =
+                            "Modify ▸ Cost basis recalculated via FIFO/LIFO engine".to_string();
                         ui.close();
                     }
                     if ui.button("Tune Overlay Parameters...").clicked() {
                         self.active_workspace = ActiveWorkspace::Terminal;
-                        self.status_message = "Modify ▸ Tune technical overlay parameters".to_string();
+                        self.status_message =
+                            "Modify ▸ Tune technical overlay parameters".to_string();
                         ui.close();
                     }
                 });
@@ -1393,7 +1884,8 @@ impl eframe::App for MoneyCraftGui {
                         self.fetch_multi_comparison();
                         self.fetch_derivatives();
                         self.fetch_news_ticker();
-                        self.status_message = "Commands ▸ Market feed & news ticker refreshed".to_string();
+                        self.status_message =
+                            "Commands ▸ Market feed & news ticker refreshed".to_string();
                         ui.close();
                     }
                     if ui.button("Recalculate Wealth Simulation").clicked() {
@@ -1402,7 +1894,8 @@ impl eframe::App for MoneyCraftGui {
                     }
                     if ui.button("Sync Sovereign Ledger").clicked() {
                         self.fetch_portfolio();
-                        self.status_message = "Commands ▸ Sovereign ledger synchronized".to_string();
+                        self.status_message =
+                            "Commands ▸ Sovereign ledger synchronized".to_string();
                         ui.close();
                     }
                 });
@@ -1415,7 +1908,8 @@ impl eframe::App for MoneyCraftGui {
                         self.show_nav_rail = true;
                         self.show_status_bar = true;
                         self.chart_zoom_bars = None;
-                        self.status_message = "Window ▸ Layout reset to default workstation docking".to_string();
+                        self.status_message =
+                            "Window ▸ Layout reset to default workstation docking".to_string();
                         ui.close();
                     }
                     ui.separator();
@@ -1458,9 +1952,10 @@ impl eframe::App for MoneyCraftGui {
                     ui.separator();
                     ui.checkbox(&mut self.show_nav_rail, "Sidebar Navigation Rail");
                     ui.checkbox(&mut self.show_status_bar, "Bottom Status Bar");
+                    ui.checkbox(&mut self.chat_dock.open, "AI Chat Dock (Ctrl+J)");
                 });
 
-                // 8. Help Menu (Standard Storytold 5-Item Suite)
+                // 8. Help Menu (Storytold Craft 10-Item Standard)
                 ui.menu_button("Help", |ui| {
                     if ui.button("Command Palette... (Ctrl+K)").clicked() {
                         self.active_dialog = Some(ActiveDialog::CommandPalette);
@@ -1470,15 +1965,47 @@ impl eframe::App for MoneyCraftGui {
                         self.active_dialog = Some(ActiveDialog::KeyboardShortcuts);
                         ui.close();
                     }
-                    if ui.button("Project Files & Docs...").clicked() {
+                    ui.separator();
+                    if ui.button("Getting Started...").clicked() {
+                        self.help_tab = HelpTab::GettingStarted;
                         self.active_dialog = Some(ActiveDialog::ProjectDocs);
                         ui.close();
                     }
+                    if ui.button("Usage (GUI, CLI & MCP)...").clicked() {
+                        self.help_tab = HelpTab::Usage;
+                        self.active_dialog = Some(ActiveDialog::ProjectDocs);
+                        ui.close();
+                    }
+                    if ui.button("Tips & Tricks...").clicked() {
+                        self.help_tab = HelpTab::TipsTricks;
+                        self.active_dialog = Some(ActiveDialog::ProjectDocs);
+                        ui.close();
+                    }
+                    if ui.button("Common Pitfalls & Safety...").clicked() {
+                        self.help_tab = HelpTab::PitfallsSafety;
+                        self.active_dialog = Some(ActiveDialog::ProjectDocs);
+                        ui.close();
+                    }
+                    if ui.button("Planned Extensions...").clicked() {
+                        self.help_tab = HelpTab::PlannedExtensions;
+                        self.active_dialog = Some(ActiveDialog::ProjectDocs);
+                        ui.close();
+                    }
+                    if ui.button("Bundled Skills...").clicked() {
+                        self.help_tab = HelpTab::BundledSkills;
+                        self.active_dialog = Some(ActiveDialog::ProjectDocs);
+                        ui.close();
+                    }
+                    if ui.button("Project Files & Docs...").clicked() {
+                        self.help_tab = HelpTab::ProjectFiles;
+                        self.active_dialog = Some(ActiveDialog::ProjectDocs);
+                        ui.close();
+                    }
+                    ui.separator();
                     if ui.button("Licenses & Notices...").clicked() {
                         self.active_dialog = Some(ActiveDialog::LicensesNotices);
                         ui.close();
                     }
-                    ui.separator();
                     if ui.button("About MoneyCraft").clicked() {
                         self.active_dialog = Some(ActiveDialog::About);
                         ui.close();
@@ -1494,6 +2021,14 @@ impl eframe::App for MoneyCraftGui {
                     };
                     if ui.small_button(format!("{icon} {label}")).clicked() {
                         self.is_dark_theme = !self.is_dark_theme;
+                    }
+
+                    if ui
+                        .selectable_label(self.chat_dock.open, "Chat (Ctrl+J)")
+                        .on_hover_text("Toggle Local AI Chat Dock (Ctrl+J)")
+                        .clicked()
+                    {
+                        self.chat_dock.open = !self.chat_dock.open;
                     }
 
                     if self.is_authenticated {
@@ -1514,46 +2049,105 @@ impl eframe::App for MoneyCraftGui {
         // Quick Button Row (Pattern 2 Accelerators into View/Window)
         egui::Panel::top("quick_accelerator_bar").show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("DESKS:").color(amber).monospace().small().strong());
+                ui.label(
+                    egui::RichText::new("DESKS:")
+                        .color(amber)
+                        .monospace()
+                        .small()
+                        .strong(),
+                );
                 let quick_btn = |ui: &mut egui::Ui, active: bool, icon: &str, name: &str| -> bool {
-                    let rich = egui::RichText::new(format!("{icon} {name}"))
-                        .color(if active { amber } else { ui.visuals().text_color() });
+                    let rich = egui::RichText::new(format!("{icon} {name}")).color(if active {
+                        amber
+                    } else {
+                        ui.visuals().text_color()
+                    });
                     ui.selectable_label(active, rich).clicked()
                 };
-                if quick_btn(ui, self.active_workspace == ActiveWorkspace::Terminal, "📊", "Terminal") {
+                if quick_btn(
+                    ui,
+                    self.active_workspace == ActiveWorkspace::Terminal,
+                    "📊",
+                    "Terminal",
+                ) {
                     self.active_workspace = ActiveWorkspace::Terminal;
                     self.fetch_market_feed();
                 }
-                if quick_btn(ui, self.active_workspace == ActiveWorkspace::PersonalWealth, "💶", "Wealth Sim") {
+                if quick_btn(
+                    ui,
+                    self.active_workspace == ActiveWorkspace::PersonalWealth,
+                    "💶",
+                    "Wealth Sim",
+                ) {
                     self.active_workspace = ActiveWorkspace::PersonalWealth;
                     self.run_wealth_simulation();
                 }
-                if quick_btn(ui, self.active_workspace == ActiveWorkspace::PortfolioLedger, "💼", "Portfolio") {
+                if quick_btn(
+                    ui,
+                    self.active_workspace == ActiveWorkspace::PortfolioLedger,
+                    "💼",
+                    "Portfolio",
+                ) {
                     self.active_workspace = ActiveWorkspace::PortfolioLedger;
                     self.fetch_portfolio();
                 }
-                if quick_btn(ui, self.active_workspace == ActiveWorkspace::MultiComparison, "📈", "Multi-Compare") {
+                if quick_btn(
+                    ui,
+                    self.active_workspace == ActiveWorkspace::MultiComparison,
+                    "📈",
+                    "Multi-Compare",
+                ) {
                     self.active_workspace = ActiveWorkspace::MultiComparison;
                     self.fetch_multi_comparison();
                 }
-                if quick_btn(ui, self.active_workspace == ActiveWorkspace::CryptoDerivatives, "⚡", "Derivatives") {
+                if quick_btn(
+                    ui,
+                    self.active_workspace == ActiveWorkspace::CryptoDerivatives,
+                    "⚡",
+                    "Derivatives",
+                ) {
                     self.active_workspace = ActiveWorkspace::CryptoDerivatives;
                     self.fetch_derivatives();
                 }
-                if quick_btn(ui, self.active_workspace == ActiveWorkspace::FantasyTrading, "🎮", "Paper Trading") {
+                if quick_btn(
+                    ui,
+                    self.active_workspace == ActiveWorkspace::FantasyTrading,
+                    "🎮",
+                    "Paper Trading",
+                ) {
                     self.active_workspace = ActiveWorkspace::FantasyTrading;
                     self.fetch_paper_account();
                 }
-                if quick_btn(ui, self.active_workspace == ActiveWorkspace::AiWorkflows, "🤖", "AI Workflows") {
+                if quick_btn(
+                    ui,
+                    self.active_workspace == ActiveWorkspace::AiWorkflows,
+                    "🤖",
+                    "AI Workflows",
+                ) {
                     self.active_workspace = ActiveWorkspace::AiWorkflows;
                 }
-                if quick_btn(ui, self.active_workspace == ActiveWorkspace::HoneypotAuditor, "🛡", "Honeypot Auditor") {
+                if quick_btn(
+                    ui,
+                    self.active_workspace == ActiveWorkspace::HoneypotAuditor,
+                    "🛡",
+                    "Honeypot Auditor",
+                ) {
                     self.active_workspace = ActiveWorkspace::HoneypotAuditor;
                 }
-                if quick_btn(ui, self.active_workspace == ActiveWorkspace::Backtester, "🔬", "Backtester") {
+                if quick_btn(
+                    ui,
+                    self.active_workspace == ActiveWorkspace::Backtester,
+                    "🔬",
+                    "Backtester",
+                ) {
                     self.active_workspace = ActiveWorkspace::Backtester;
                 }
-                if quick_btn(ui, self.active_workspace == ActiveWorkspace::DataSources, "📡", "Data Sources") {
+                if quick_btn(
+                    ui,
+                    self.active_workspace == ActiveWorkspace::DataSources,
+                    "📡",
+                    "Data Sources",
+                ) {
                     self.active_workspace = ActiveWorkspace::DataSources;
                 }
             });
@@ -1579,7 +2173,8 @@ impl eframe::App for MoneyCraftGui {
                             let change_usd = summary["change_24h_usd"].as_f64().unwrap_or(0.0);
                             let is_forex = summary["is_forex"].as_bool().unwrap_or(false);
                             let is_index = summary["is_index"].as_bool().unwrap_or(false);
-                            let pip_precision = summary["pip_precision"].as_u64().unwrap_or(2) as usize;
+                            let pip_precision =
+                                summary["pip_precision"].as_u64().unwrap_or(2) as usize;
 
                             ui.label(
                                 egui::RichText::new(&self.selected_symbol)
@@ -1603,8 +2198,12 @@ impl eframe::App for MoneyCraftGui {
                             );
 
                             let sign = if change_pct >= 0.0 { "+" } else { "" };
-                            let change_txt = format!("{sign}{change_usd:+.2} ({sign}{change_pct:.2}%)");
-                            ui.colored_label(if change_pct >= 0.0 { green } else { red }, change_txt);
+                            let change_txt =
+                                format!("{sign}{change_usd:+.2} ({sign}{change_pct:.2}%)");
+                            ui.colored_label(
+                                if change_pct >= 0.0 { green } else { red },
+                                change_txt,
+                            );
                         }
                     }
 
@@ -1657,7 +2256,9 @@ impl eframe::App for MoneyCraftGui {
                                     _ => amber,
                                 };
 
-                                ui.label(egui::RichText::new(format!("[{time}]")).weak().monospace());
+                                ui.label(
+                                    egui::RichText::new(format!("[{time}]")).weak().monospace(),
+                                );
                                 ui.label(
                                     egui::RichText::new(format!("[{cat}]"))
                                         .color(amber)
@@ -1681,7 +2282,9 @@ impl eframe::App for MoneyCraftGui {
                             }
                         }
                     } else {
-                        ui.label(egui::RichText::new("Connecting to sovereign news wire...").weak());
+                        ui.label(
+                            egui::RichText::new("Connecting to sovereign news wire...").weak(),
+                        );
                     }
                 });
             });
@@ -1720,7 +2323,7 @@ impl eframe::App for MoneyCraftGui {
             });
         }
 
-        // 4. Navigation Rail — every section collapsible + scrollable so the
+        // 4. Navigation Rail - every section collapsible + scrollable so the
         // rail never becomes a hundred vertical steps.
         if self.show_nav_rail {
             egui::Panel::left("finance_nav_rail").min_size(230.0).show(ui, |ui| {
@@ -1780,7 +2383,7 @@ impl eframe::App for MoneyCraftGui {
             }
             });
 
-            egui::CollapsingHeader::new("GLOBAL INDICES — Yahoo 15m delayed")
+            egui::CollapsingHeader::new("GLOBAL INDICES - Yahoo 15m delayed")
                 .default_open(true)
                 .show(ui, |ui| {
                 for (sym, name, _cat) in moneycraft_feed::MarketFeed::index_universe() {
@@ -1793,7 +2396,7 @@ impl eframe::App for MoneyCraftGui {
                 }
             });
 
-            egui::CollapsingHeader::new("STOCKS — Yahoo 15m delayed")
+            egui::CollapsingHeader::new("STOCKS - Yahoo 15m delayed")
                 .default_open(true)
                 .show(ui, |ui| {
                 for (ticker, name, _cat) in moneycraft_feed::MarketFeed::stock_universe() {
@@ -1820,7 +2423,7 @@ impl eframe::App for MoneyCraftGui {
                 ui.label(egui::RichText::new("e.g. AAPL, MSFT, SAP.DE, ASML").small().weak());
             });
 
-            egui::CollapsingHeader::new("FOREX DESK — FROM/TO + 20 majors")
+            egui::CollapsingHeader::new("FOREX DESK - FROM/TO + 20 majors")
                 .default_open(true)
                 .show(ui, |ui| {
                 ui.label(egui::RichText::new("Direction matters: EUR/USD != USD/EUR. Yahoo 15m, ECB daily.").small().weak());
@@ -1833,7 +2436,7 @@ impl eframe::App for MoneyCraftGui {
                         .selected_text(from.clone())
                         .show_ui(ui, |ui| {
                             for (code, name) in &majors {
-                                let _ = ui.selectable_value(&mut from, code.to_string(), format!("{code} — {name}"));
+                                let _ = ui.selectable_value(&mut from, code.to_string(), format!("{code} - {name}"));
                             }
                         });
                     if ui.button("⇄ Swap").clicked() {
@@ -1844,7 +2447,7 @@ impl eframe::App for MoneyCraftGui {
                         .selected_text(to.clone())
                         .show_ui(ui, |ui| {
                             for (code, name) in &majors {
-                                let _ = ui.selectable_value(&mut to, code.to_string(), format!("{code} — {name}"));
+                                let _ = ui.selectable_value(&mut to, code.to_string(), format!("{code} - {name}"));
                             }
                         });
                 });
@@ -1862,7 +2465,7 @@ impl eframe::App for MoneyCraftGui {
                     }
                 });
                 if pair_invalid {
-                    ui.colored_label(red, "FROM and TO must differ — pick a direction.");
+                    ui.colored_label(red, "FROM and TO must differ - pick a direction.");
                 } else {
                     // Keep selectors in sync even without Load (for menu parity).
                     self.forex_from = from.clone();
@@ -1934,6 +2537,46 @@ impl eframe::App for MoneyCraftGui {
             });
             });
             });
+        }
+
+        // 4b. Optional Right AI Chat Dock (Ctrl+J)
+        if self.chat_dock.open {
+            let max_w = if self.chat_dock.maximized {
+                (ui.ctx().content_rect().width() * 0.65).max(460.0)
+            } else {
+                420.0
+            };
+            let default_w = if self.chat_dock.maximized {
+                max_w
+            } else {
+                360.0
+            };
+            let ws_name = match self.active_workspace {
+                ActiveWorkspace::Terminal => "Terminal",
+                ActiveWorkspace::DataSources => "DataSources",
+                ActiveWorkspace::PersonalWealth => "PersonalWealth",
+                ActiveWorkspace::MultiComparison => "MultiComparison",
+                ActiveWorkspace::CryptoDerivatives => "CryptoDerivatives",
+                ActiveWorkspace::FantasyTrading => "FantasyTrading",
+                ActiveWorkspace::AiWorkflows => "AiWorkflows",
+                ActiveWorkspace::HoneypotAuditor => "HoneypotAuditor",
+                ActiveWorkspace::Backtester => "Backtester",
+                ActiveWorkspace::PortfolioLedger => "PortfolioLedger",
+                ActiveWorkspace::Help => "Help",
+            };
+            let chat_ctx = ChatContext {
+                workspace: ws_name,
+                symbol: &self.selected_symbol,
+                data_source: &self.active_data_source,
+                locale: self.locale.code(),
+            };
+            egui::Panel::right("moneycraft_chat_dock")
+                .resizable(true)
+                .default_size(default_w)
+                .size_range(280.0..=max_w)
+                .show(ui, |ui| {
+                    self.chat_dock.ui(ui, &self.bridge, &chat_ctx);
+                });
         }
 
         // 5. Central Panel
@@ -2310,7 +2953,7 @@ impl MoneyCraftGui {
                 egui::RichText::new("📖 MONEYCRAFT OPERATOR MANUAL").color(amber),
             );
             ui.label(
-                "Every function in this terminal, in one place. Pick a section below — each opens with the controls it documents.",
+                "Every function in this terminal, in one place. Pick a section below - each opens with the controls it documents.",
             );
             ui.add_space(4.0);
             ui.horizontal(|ui| {
@@ -2335,14 +2978,14 @@ impl MoneyCraftGui {
             egui::CollapsingHeader::new("🖥️ Getting around")
                 .default_open(true)
                 .show(ui, |ui| {
-                    ui.label("• Sidebar (left): every section is collapsible — collapse what you don't use so the rail never becomes a hundred-item scroll.");
+                    ui.label("• Sidebar (left): every section is collapsible - collapse what you don't use so the rail never becomes a hundred-item scroll.");
                     ui.label("• Top menu bar: File (sync ledger, refresh feed, exit), Personal Wealth, Global Indices, Stocks, Forex Desk, Crypto & Perps, AI Workflows, Help.");
                     ui.label("• Top-right: Light/Dark theme switch, login state, interface language (EN/DE/FR/ES/JA/KO/ZH).");
-                    ui.label("• News wire: the breaking-news ticker under the top bar cycles headlines — ▶ Next Wire skips ahead. Sentiment tags (BULLISH/BEARISH) color the wire.");
+                    ui.label("• News wire: the breaking-news ticker under the top bar cycles headlines - ▶ Next Wire skips ahead. Sentiment tags (BULLISH/BEARISH) color the wire.");
                     ui.label("• Status line (bottom): shows the active feed, last update note, and bar count for the current symbol.");
                 });
 
-            egui::CollapsingHeader::new("📊 Terminal chart — reading it")
+            egui::CollapsingHeader::new("📊 Terminal chart - reading it")
                 .default_open(true)
                 .show(ui, |ui| {
                     ui.label("• FEED SOURCE dropdown: which pipe fills the chart. Yahoo = 15-min delayed exchange data (free). Binance/Hyperliquid = live crypto (free, 0s). ECB = daily central-bank fixing. Synthetic = offline random-walk for airplane mode.");
@@ -2351,15 +2994,15 @@ impl MoneyCraftGui {
                     ui.label("• OVERLAYS: SMA20 (cyan trend), EMA50 (gold trend), BBands (purple volatility envelope), Vol (volume bars + aggression tint), RSI (14-period momentum sub-panel, 70/30 bands).");
                     ui.label("• 🚩 Panics: crimson year markers for 1720/1825/1847/1857/1866/1873/1929/1987/2008/2020. Hover a marker for the crisis card (cause, drop, lesson).");
                     ui.label("• Hover the chart: crosshair + HUD card shows bar index, O/H/L/C and volume at the cursor.");
-                    ui.colored_label(green, "• Wheel zoom: roll the mouse wheel over the chart to zoom into the last N bars. Pure view operation — no refetch, overlays stay aligned, price scale rescales. Zoom out fully (or change symbol, source or range) to reset.");
+                    ui.colored_label(green, "• Wheel zoom: roll the mouse wheel over the chart to zoom into the last N bars. Pure view operation - no refetch, overlays stay aligned, price scale rescales. Zoom out fully (or change symbol, source or range) to reset.");
                 });
 
-            egui::CollapsingHeader::new("🔍 Picking symbols — indices, stocks, forex")
+            egui::CollapsingHeader::new("🔍 Picking symbols - indices, stocks, forex")
                 .default_open(true)
                 .show(ui, |ui| {
-                    ui.label("• GLOBAL INDICES: 10 one-click benchmarks — DJIA, SPX, NDX, DAX, N225, KOSPI, FTSE, HSI, STOXX50, CAC40.");
-                    ui.label("• STOCKS: 15 quick picks (AAPL, MSFT, NVDA, AMZN, META, TSLA, GOOGL, AMD, NFLX, JPM, XOM, JNJ, SAP.DE, ASML, SPY). Any other Yahoo ticker works too — type it in the custom field and press Load (e.g. SIE.DE, AIR.PA, NESN.SW).");
-                    ui.label("• FOREX DESK: direction matters — EUR/USD and USD/EUR are different pairs with inverse prices. Pick FROM and TO out of the 20 majors, press ⇄ to swap, Load to chart. Quick pairs cover the 15 most-traded crosses.");
+                    ui.label("• GLOBAL INDICES: 10 one-click benchmarks - DJIA, SPX, NDX, DAX, N225, KOSPI, FTSE, HSI, STOXX50, CAC40.");
+                    ui.label("• STOCKS: 15 quick picks (AAPL, MSFT, NVDA, AMZN, META, TSLA, GOOGL, AMD, NFLX, JPM, XOM, JNJ, SAP.DE, ASML, SPY). Any other Yahoo ticker works too - type it in the custom field and press Load (e.g. SIE.DE, AIR.PA, NESN.SW).");
+                    ui.label("• FOREX DESK: direction matters - EUR/USD and USD/EUR are different pairs with inverse prices. Pick FROM and TO out of the 20 majors, press ⇄ to swap, Load to chart. Quick pairs cover the 15 most-traded crosses.");
                     ui.label("• 20 majors: USD EUR JPY GBP CHF CAD AUD NZD CNY HKD SGD SEK NOK DKK MXN ZAR KRW INR BRL PLN.");
                     ui.colored_label(red, "• Delayed data only (Yahoo 15 min, ECB daily). Nothing here is a live quote or investment advice.");
                 });
@@ -2371,7 +3014,7 @@ impl MoneyCraftGui {
                     ui.label("• Binance / Hyperliquid: live crypto klines and perp mark prices, $0, no key. The only real-time pipes in the building.");
                     ui.label("• Yahoo Finance: 10 indices + 15 stocks + any forex cross + gold + BTC/ETH/SOL, 15-min delayed, $0, no key. The default.");
                     ui.label("• ECB EuroFX: official daily reference rates (~14:15 CET), any cross computed via EUR, $0.");
-                    ui.label("• TwelveData / Finnhub, IBKR Gateway, Polygon.io, Bloomberg B-PIPE: payola tiers — real-time exchange data costs money because exchanges own the quotes. IBKR passes through raw exchange fees (~$1.50/mo); Bloomberg charges ~$2.5k/mo per seat.");
+                    ui.label("• TwelveData / Finnhub, IBKR Gateway, Polygon.io, Bloomberg B-PIPE: payola tiers - real-time exchange data costs money because exchanges own the quotes. IBKR passes through raw exchange fees (~$1.50/mo); Bloomberg charges ~$2.5k/mo per seat.");
                     if ui.button("Open the full payola matrix").clicked() {
                         self.active_workspace = ActiveWorkspace::DataSources;
                     }
@@ -2389,7 +3032,7 @@ impl MoneyCraftGui {
                 .default_open(false)
                 .show(ui, |ui| {
                     ui.label("• Funding table: 8h and annualized rates per venue (Hyperliquid, Binance, Bybit, OKX) plus open interest. The arb spread row = best long venue vs best short venue.");
-                    ui.label("• Liquidation heatmap: notional stacked above (SHORT_LIQ) and below (LONG_LIQ) mark price — where forced sellers/buyers cluster.");
+                    ui.label("• Liquidation heatmap: notional stacked above (SHORT_LIQ) and below (LONG_LIQ) mark price - where forced sellers/buyers cluster.");
                     ui.label("• Only meaningful for BTC/ETH/SOL. For TradFi symbols it mirrors the spot price.");
                 });
 
@@ -2398,7 +3041,7 @@ impl MoneyCraftGui {
                 .show(ui, |ui| {
                     ui.label("• LONG/SHORT, SPOT or PERP_FUTURES, quantity, 1x–50x leverage. Fill price = current chart price unless overridden.");
                     ui.label("• Liquidation price is computed from entry and leverage (≈ 90% adverse move ÷ leverage). Unrealized PnL updates against the live feed.");
-                    ui.label("• Reset Account restores the €100,000 fantasy balance. Sandbox only — no orders ever leave this machine.");
+                    ui.label("• Reset Account restores the €100,000 fantasy balance. Sandbox only - no orders ever leave this machine.");
                 });
 
             egui::CollapsingHeader::new("🧠 AI workflows (4 modes)")
@@ -2407,14 +3050,14 @@ impl MoneyCraftGui {
                     ui.label("• STRATEGY_GEN: drafts a momentum + Bollinger mean-reversion ruleset for the current symbol.");
                     ui.label("• STRESS_TEST: runs the 10,000-path Monte Carlo macro shock suite (rate shock, liquidity freeze, FX deval).");
                     ui.label("• SENTIMENT_ALPHA: scores the news wire for the active symbol and tilts the signal.");
-                    ui.label("• EXECUTION_ROUTER: picks venue/order slicing for a hypothetical fill (venue logic only — executes nothing).");
+                    ui.label("• EXECUTION_ROUTER: picks venue/order slicing for a hypothetical fill (venue logic only - executes nothing).");
                     ui.label("• Prompt box is free text; Target Asset defaults to the chart symbol. Results render as JSON in the panel.");
                 });
 
             egui::CollapsingHeader::new("🛡️ Honeypot auditor, ⚙️ backtester, 💼 ledger")
                 .default_open(false)
                 .show(ui, |ui| {
-                    ui.label("• Auditor: paste a contract address + chain — flags honeypot/drainer patterns (transfer locks, mint traps, blacklist) with a 0–100 risk score. Read-only scan, never touches a wallet.");
+                    ui.label("• Auditor: paste a contract address + chain - flags honeypot/drainer patterns (transfer locks, mint traps, blacklist) with a 0–100 risk score. Read-only scan, never touches a wallet.");
                     ui.label("• Backtester: strategy name + symbol + starting capital → 10,000-path Monte Carlo report (median/percentiles, max drawdown). Synthetic paths, not a fill guarantee.");
                     ui.label("• Portfolio ledger: equity, available balance, margin used, win/loss counts, open positions table, estimated tax line. Reset restores the fantasy account.");
                 });
@@ -2550,7 +3193,7 @@ impl MoneyCraftGui {
                 ui.add_space(4.0);
 
                 ui.label(egui::RichText::new("4. How Sovereign Quants Beat the $30,000 Bloomberg Cartel:").strong());
-                ui.label("Professional retail quants combine: (a) Hyperliquid/Binance for real-time crypto perps ($0), (b) Yahoo Finance & ECB for macro reference ($0), and (c) Interactive Brokers Gateway for real-time TradFi — paying only the raw exchange pass-through fee ($1.50/month for OPRA US Equity Options, $1.25/month for Network A/B) via local port 7496, saving 99% compared to Wall Street institutional licenses.");
+                ui.label("Professional retail quants combine: (a) Hyperliquid/Binance for real-time crypto perps ($0), (b) Yahoo Finance & ECB for macro reference ($0), and (c) Interactive Brokers Gateway for real-time TradFi - paying only the raw exchange pass-through fee ($1.50/month for OPRA US Equity Options, $1.25/month for Network A/B) via local port 7496, saving 99% compared to Wall Street institutional licenses.");
             });
         });
     }
@@ -2823,7 +3466,7 @@ impl MoneyCraftGui {
             ui.separator();
             if self.chart_zoom_bars.is_some() {
                 ui.label(
-                    egui::RichText::new("🔍 zoomed — wheel out or change range to reset").small(),
+                    egui::RichText::new("🔍 zoomed - wheel out or change range to reset").small(),
                 );
             } else {
                 ui.label(egui::RichText::new("wheel on chart = zoom").small().weak());
@@ -2842,7 +3485,7 @@ impl MoneyCraftGui {
 
         // Mouse-wheel zoom: local view window over the already-loaded bars.
         // Plain wheel zooms (the terminal chart is NOT inside a ScrollArea,
-        // so nothing else competes for the gesture). No refetch — zoom only
+        // so nothing else competes for the gesture). No refetch - zoom only
         // slices the loaded series; changing symbol/source/range resets it.
         let loaded_bars = self
             .market_data
@@ -4182,7 +4825,7 @@ impl MoneyCraftGui {
         let red = theme_red();
 
         ui.heading(egui::RichText::new("💼 SOVEREIGN PORTFOLIO LEDGER").color(amber));
-        ui.label("Your real holdings — FIFO cost basis, live valuation, Austrian KESt estimate. No crypto, no mannequins.");
+        ui.label("Your real holdings - FIFO cost basis, live valuation, Austrian KESt estimate. No crypto, no mannequins.");
 
         ui.add_space(8.0);
         let Some(ref p) = self.portfolio_data else {
@@ -4195,7 +4838,7 @@ impl MoneyCraftGui {
         let empty = p["count"].as_u64().unwrap_or(0) == 0;
         if empty {
             ui.label(
-                egui::RichText::new("Ledger is empty — nothing you own is tracked yet.").strong(),
+                egui::RichText::new("Ledger is empty - nothing you own is tracked yet.").strong(),
             );
             ui.label("Add your first position from a terminal:");
             ui.monospace("moneycraft-mcp ledger-add SAP.DE --side BUY --quantity 10 --price 228 --venue flatex");
@@ -4264,14 +4907,14 @@ impl MoneyCraftGui {
                         };
                         match mv {
                             Some(m) => ui.label(format!("{m:.2}")).highlight(),
-                            None => ui.weak("—"),
+                            None => ui.weak("-"),
                         };
                         match pnl {
                             Some(v) => ui.colored_label(
                                 if v >= 0.0 { green } else { red },
                                 format!("{v:+.2}"),
                             ),
-                            None => ui.weak("—"),
+                            None => ui.weak("-"),
                         };
                         ui.end_row();
                     }
@@ -4290,41 +4933,10 @@ impl MoneyCraftGui {
         }
         ui.label(
             egui::RichText::new(
-                "KESt estimate only: 27.5% flat on realized YTD gains. Not tax advice — talk to a Steuerberater.",
+                "KESt estimate only: 27.5% flat on realized YTD gains. Not tax advice - talk to a Steuerberater.",
             )
             .small()
             .weak(),
         );
     }
-}
-
-fn main() -> Result<(), eframe::Error> {
-    let rt = tokio::runtime::Runtime::new().unwrap_or_else(|e| {
-        eprintln!("Failed to create Tokio runtime: {e}");
-        std::process::exit(1);
-    });
-
-    if std::env::args().any(|a| a == "--smoke") {
-        let code = MoneyCraftGui::smoke(&rt);
-        std::process::exit(code);
-    }
-
-    let store = DatabaseStore::open_in_memory().unwrap_or_else(|e| {
-        eprintln!("Failed to initialize local SQLite store: {e}");
-        std::process::exit(1);
-    });
-
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1280.0, 840.0])
-            .with_min_inner_size([960.0, 600.0])
-            .with_title("MoneyCraft Bloomberg Sovereign Terminal"),
-        ..Default::default()
-    };
-
-    eframe::run_native(
-        "MoneyCraft Bloomberg Sovereign Terminal",
-        options,
-        Box::new(|_cc| Ok(Box::new(MoneyCraftGui::new(Arc::new(store), Arc::new(rt))))),
-    )
 }

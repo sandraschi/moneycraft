@@ -15,6 +15,7 @@
 pub mod history;
 pub mod i18n;
 pub mod ledger;
+pub mod skills;
 
 use databasecraft_store::DatabaseStore;
 use moneycraft_broker::Broker;
@@ -553,8 +554,8 @@ pub async fn dispatch(cmd: Command, _store: &DatabaseStore) -> Value {
             let pos = PaperPosition {
                 id: format!(
                     "POS-{}",
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
+                    web_time::SystemTime::now()
+                        .duration_since(web_time::UNIX_EPOCH)
                         .map(|d| d.as_secs())
                         .unwrap_or(0)
                 ),

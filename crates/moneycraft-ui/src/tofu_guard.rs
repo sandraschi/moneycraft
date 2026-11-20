@@ -76,12 +76,19 @@ mod tests {
             "Portfolio Inspector",
             "Trade Journal",
             "News Terminal",
-            // Mandatory 5-Dialog Suite
+            // Mandatory Craft Help Suite
             "Command Palette... (Ctrl+K)",
             "Keyboard Shortcuts... (F1)",
+            "Getting Started...",
+            "Usage (GUI, CLI & MCP)...",
+            "Tips & Tricks...",
+            "Common Pitfalls & Safety...",
+            "Planned Extensions...",
+            "Bundled Skills...",
             "Project Files & Docs...",
             "Licenses & Notices...",
             "About MoneyCraft",
+            "Chat (Ctrl+J)",
         ];
 
         for label in &labels {
