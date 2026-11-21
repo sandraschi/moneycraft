@@ -29,7 +29,7 @@ MoneyCraft is an offline-first Rust financial intelligence studio, time-series t
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-craft.ps1
 ```
 
-Installs the Windows app, `moneycraft-cli`, and the MCP bundle.
+Installs the Windows app and the CLI (Start Menu shortcut, CLI on the user PATH). `-RegisterClients` also registers the MCP exe with the IDEs that are installed. `-Clients cursor,claude-desktop` limits that list. `-Mcpb` installs the Claude Desktop extension bundle.
 
 ## Example Prompts
 
