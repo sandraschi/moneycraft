@@ -1,81 +1,130 @@
-# MoneyCraft
+# MoneyCraft: Local-First Financial Intelligence & Quantitative Terminal
 
-MoneyCraft is an offline-first Rust financial intelligence studio, time-series terminal, and local portfolio ledger built for personal wealth analysis, market research, and paper trading.
+**MoneyCraft** is an offline-first, pure-Rust quantitative finance studio, Bloomberg-grade time-series terminal, and local-first algorithmic workbench for the sandraschi fleet.
 
-## What You Can Do
-
-- **Model personal wealth and inflation drag**: Compare Girokonto, Festgeld, and Bausparvertrag returns against inflation with Rule-of-72 alerts and year-by-year purchasing power tables.
-- **Analyze global indices and G10 forex**: Track `DJIA`, `SPX`, `NDX`, `DAX`, `N225`, `KOSPI`, `FTSE`, `HSI`, and 20 major FX pairs with `1D`–`1Y` presets and zero-baseline multi-asset comparison.
-- **Chart with institutional indicators**: Switch between Candlestick, Heikin-Ashi, and Mountain Area views with `SMA 20`, `EMA 50`, Bollinger Bands, Volume, `RSI 14`, and 1720–2026 historical panic overlays.
-- **Track holdings in a local FIFO ledger**: Record stocks, ETFs, bonds, and cash in `moneycraft-ledger.db` (SQLite) with FIFO cost-basis and Austrian KESt estimation.
-- **Practice in a paper-only trading sandbox**: Test `1x–50x` simulated spot and futures positions (`PaperOpen`/`PaperClose`) — `PlaceOrder` always refuses, and MoneyCraft never connects to a real broker or moves real money.
-- **Audit EVM bytecode and run Monte Carlo backtests**: Check token contracts locally for transfer taxes or honeypot patterns, and run 10,000-path strategy simulations.
-- **Use `Ctrl+J` AI Chat, Help menu, and Bundled Skills**: Press `Ctrl+J` for the offline **AI Chat Dock**, `Ctrl+K` for the Command Palette, or open the **10-item Help menu** and **Bundled Skills** (`skill://moneycraft-workflow/SKILL.md`, `skill://moneycraft-ledger/SKILL.md`).
-- **Automate via CLI and 28 MCP tools**: Drive queries, backtests, and ledger operations from Claude Desktop or any MCP client via `moneycraft-cli`.
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│               MONEYCRAFT SOVEREIGN TERMINAL v0.7.0                     │
+│                  Control Port: 14117 // Rust egui 0.37                 │
+├────────────────────────────────────────────────────────────────────────┤
+│ 💶 Personal Wealth & Inflation| Girokonto, Festgeld, Bausparer vs Drag  │
+│ 🌐 Global Indices Desk      | DJIA, SPX, NDX, DAX, N225, KOSPI, FTSE…+3 │
+│ 📈 Multi-Asset Comparison   | Normalized % Return Overlays (0.0% Base) │
+│ ⏱️ Date Range Presets       | 1D, 1W, 1M, 3M, YTD, 1Y Presets          │
+│ 📊 Time-Series Terminal     | 🕯️ Candlesticks, Mountain Area, Heikin-Ashi│
+│ 📈 Technical Indicators     | SMA 20, EMA 50, Bollinger Bands, Vol, RSI│
+│ 💱 Forex Desk     | Any FROM/TO cross of 20 majors (Yahoo 15m)  │
+│ 🔥 Crypto Derivatives Desk  | Hyperliquid Funding Arbitrage & Liq Map  │
+│ 🎮 Fantasy Paper Trading    | 1x–50x Leverage Futures & Spot Sandbox   │
+│ ⚡ Breaking News Wire       | Real-time Macro/FX wire with NLP Sentiment│
+│ 🧠 Agentic AI Quant Workflows| Strategy Gen, PORT Stress-Test, Alpha, SOR│
+│ 🛡️ EVM Honeypot Auditor    | Local Sandbox bytecode scam analyzer      │
+│ ⚙️ Monte Carlo Backtester  | 10,000-path simulation (Sharpe, Drawdown) │
+│ 💼 Local Tax Ledger     | Offline FIFO/LIFO private balance sheet   │
+└────────────────────────────────────────────────────────────────────────┘
+```
 
 ## Install
 
-1. Download **`moneycraft-0.7.0-setup.exe`** from the [latest release](https://github.com/sandraschi/moneycraft/releases/latest).
-2. Run it. Windows may show a SmartScreen warning because the installer is unsigned: choose **More info > Run anyway**.
-3. Open **MoneyCraft** from the Start menu.
-
-**Only want the tools inside Claude?** The `.mcpb` bundle registers the MCP server in Claude Desktop but does **not** install the desktop terminal. Paste this to Claude:
-
-> Install the moneycraft MCP extension: download `moneycraft-0.7.0.mcpb` from https://github.com/sandraschi/moneycraft/releases/latest and open it with Claude Desktop.
-
-**From a local checkout (Windows):**
+From a local checkout (Windows):
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-craft.ps1
 ```
 
-Installs the Windows app, `moneycraft-cli`, and the MCP bundle.
+Installs the Windows app and the CLI (Start Menu shortcut, CLI on the user PATH). `-RegisterClients` also registers the MCP exe with the IDEs that are installed. `-Clients cursor,claude-desktop` limits that list. `-Mcpb` installs the Claude Desktop extension bundle.
 
-## Example Prompts
+## Is this real trading? No. (Read this first)
 
-> "Simulate 2,000 EUR/month income with 3.8% inflation across Girokonto vs Festgeld over 10 years."
+If you installed this from the repo hoping to trade: **MoneyCraft cannot move real money.** There is no broker connection, no exchange account, no order routing. The trading desk is a **fantasy/paper sandbox** - it simulates fills against delayed or synthetic feeds so you can learn, test ideas, and bankrupt yourself with day trading only *in your imagination* (dark joke, real warning: the habits transfer, the profits don't).
 
-> "Fetch `EUR/USD` and `DAX` time series and compare their normalized percentage return over 3M."
+Concretely: `PaperOpen`/`PaperClose` never touch a venue, `PlaceOrder` refuses instead of faking a fill, and every live-data pipe in the building is read-only (Yahoo 15-min delayed, Binance/Hyperledger public klines, ECB daily fixing).
 
-> "Record a buy of 10 shares in the local FIFO ledger and show my current cost basis."
+**Going live is a defined, small job, not a rewrite.** The seams already exist: one `Command` enum, one `MarketFeed` abstraction, one set of `Paper*` arms that a broker adapter can replace 1:1. With an hour of Opus or Argon, a forker can wire a real venue behind each asset class and own a genuine little Bloomberg desk. See **[LIVE_TRADING_PLAN.md](LIVE_TRADING_PLAN.md)** for the venue-by-venue scaffold (stocks, forex, sovereign bonds, crypto), the safety rails it demands, and what to wire first.
 
-> "Run a 10,000-path Monte Carlo backtest on the current strategy and report Sharpe and max drawdown."
+## Key Modules & Capabilities
 
-## Three Ways to Use It
+1. **Beginner Personal Wealth & Inflation Erosion Simulator**:
+   - Compounding engine modeling monthly income (e.g. 2,000 €/mo), living expenses, Girokonto (0% interest), Festgeld (3.0% 3-year term), and Bausparvertrag (1.5% interest + monthly contributions).
+   - Real-time diagnostic HUD exposing interest earned vs inflation drag and net real yield.
+   - Rule of 72 halving alert showing years until real purchasing power is halved.
+   - Year-by-year table comparing nominal bank app balance against real purchasing power with cumulative silent inflation losses.
+   - Actionable beginner portfolio playbook (Emergency cash buffer, Geldmarkt-ETF DBX0AN, MSCI World ETF, and physical gold).
 
-| Surface | Start With | Best For |
-|---|---|---|
-| **Desktop Terminal** | `moneycraft` | Personal wealth simulator, time-series charts, portfolio ledger, and `Ctrl+J` Chat |
-| **Command Line** | `moneycraft-cli --help` | Headless ticker queries, backtests, and scripted ledger checks |
-| **MCP Server** | `moneycraft-cli` (stdio) | Calling 28 finance tools and bundled skills from Claude Desktop or your IDE |
+2. **Global Market Indices Desk & Date Ranges**:
+   - Major world benchmarks: Dow Jones (`DJIA`), S&P 500 (`SPX`), Nasdaq-100 (`NDX`), DAX 40 (`DAX`), Nikkei 225 (`N225`), KOSPI (`KOSPI`), FTSE 100 (`FTSE`), and Hang Seng (`HSI`).
+   - One-click date range presets: `1D`, `1W`, `1M`, `3M`, `YTD`, and `1Y`.
 
-## Keyboard Shortcuts (Desktop Terminal)
+3. **Multi-Asset Normalized Return Comparison Graph**:
+   - Zero-baseline normalized percentage return curves allowing fair side-by-side comparison across assets of vastly different nominal scales (e.g. DJIA at 42,200 vs KOSPI at 2,580 vs EUR/USD at 1.0845).
 
-| Shortcut | Action |
-|---|---|
-| `Ctrl+J` | Toggle the offline **AI Chat Dock** |
-| `Ctrl+K` / `Ctrl+Shift+P` | Open the Command Palette |
-| `F1` | Open the Help Center |
+4. **Bloomberg-Grade Time-Series Charting**:
+   - High-density 60-bar stochastic time-series canvas with true black obsidian background (`#06080c`).
+   - Dynamic switching between standard candlesticks, filled mountain area curves, and smoothed Heikin-Ashi.
+   - Built-in technical indicators: SMA 20, EMA 50, Bollinger Bands ribbon (2σ), Volume profile, and RSI 14 oscillator.
+   - Snapping crosshair HUD projecting time, open, high, low, close, and volume.
 
-## Safety Posture (Paper-Only)
+2. **G10 Forex Desk**:
+   - Complete support for Euro (`EUR`), US Dollar (`USD`), Japanese Yen (`JPY`), British Pound (`GBP`), and Chinese Renminbi (`CNY/RMB`).
+   - 4-decimal and 2-decimal pip scaling across chart axes and tooltips.
 
-MoneyCraft cannot execute live trades. Only the `paper` broker venue is compiled (`live_armed: false`), `finance_place_order` refuses live orders, and all external market feeds (Yahoo delayed, Binance/Hyperliquid public klines, ECB daily fixing) are read-only.
+3. **Breaking News Wire & NLP Sentiment Ticker**:
+   - Continuous horizontal news ribbon below main navigation bar.
+   - Real-time sentiment tagging: `🟢 BULLISH`, `🔴 BEARISH`, and `🟡 NEUTRAL` with semantic polarity scores.
 
-## Documentation
+4. **Agentic AI Quantitative Workflows**:
+   - **BQuant Strategy Generator**: Natural language prompt to vectorized Python/Rust strategy code, Sharpe ratio, and drawdown metrics.
+   - **PORT Macro Shock Stress-Testing**: Central bank interest rate simulations, factor betas, and portfolio $\text{VaR}_{99}$.
+   - **NLP Sentiment Alpha**: Real-time transcript and news catalyst analysis.
+   - **Smart Order Routing (SOR)**: Adaptive VWAP block slicing across venues to minimize market impact.
 
-| Document | Contents |
-|---|---|
-| [HELP.md](HELP.md) | Complete user guide, 6-crate architecture, shortcuts (`Ctrl+J`, `Ctrl+K`), and ledger reference |
-| [docs/PRD.md](docs/PRD.md) | Product requirements, capabilities, and safety rules |
-| [docs/TIERED_PLAN.md](docs/TIERED_PLAN.md) | Release tiers and verification roadmap |
-| [docs/UI_PARITY.md](docs/UI_PARITY.md) | Desktop UI and WebAssembly parity matrix |
-| [LIVE_TRADING_PLAN.md](LIVE_TRADING_PLAN.md) | Architectural notes on broker-adapter seams (not enabled) |
+5. **Anti-Scam EVM Honeypot Auditor**:
+   - Local sandbox EVM simulation detecting transfer taxes (>5%), blacklist backdoors, and unrenounced mint privileges.
 
-## Requirements
+6. **Microsecond Monte Carlo Backtester**:
+   - 10,000-path algorithmic testing with win rates, maximum drawdowns, and Sharpe ratios.
 
-- **OS**: Windows 10/11 (x64) for the installer; Linux/macOS supported from source
-- **Network**: Optional; core terminal, personal wealth simulator, and SQLite ledger work offline
+7. **Zero-Leakage Local Portfolio Ledger**:
+   - Local private SQLite database (backed by **DatabaseCraft** B-Trees).
+   - Real-time FIFO/LIFO capital gains tax accounting.
 
-## License
+## Architecture
 
-MIT or Apache-2.0, at your option.
+- `crates/moneycraft-feed`: Market feeds, stochastic drift generator, technical indicators, and sandbox EVM.
+- `crates/moneycraft-core`: Quantitative command bus (`Command::dispatch`), port `14117`, and AI workflow engines.
+- `crates/moneycraft-mcp`: Line-delimited MCP stdio server + CLI (`moneycraft-cli`).
+- `crates/moneycraft-app`: Native desktop graphical terminal (`moneycraft`).
+
+## Quick Start
+
+```powershell
+# Run desktop terminal
+cargo run -p moneycraft-app
+
+# Run CLI ticker
+cargo run -p moneycraft-mcp --bin moneycraft-cli -- ticker EUR/USD
+cargo run -p moneycraft-mcp --bin moneycraft-cli -- ticker USD/JPY
+
+# Run test suite
+cargo test --workspace
+```
+
+## Standard Port
+Assigned port: **14117** (registered in `mcp-central-docs/operations/WEBAPP_PORTS.md`).
+
+## Status - does today / next week / non-goals
+
+**Does today:** 4-crate Rust workspace (core/feed/mcp/app) + root
+PRD/SPEC/HELP; feed ingest + backtest verbs declared; historical
+deep-archive to 1720/1850 with panic annotations; 2 test fns.
+
+**Next week:** paper-only safety rule enforced in code + credential
+redaction; backtest fixture tests (known series → known numbers, no
+lookahead); first democraft recipe on fixtures.
+
+**Non-goals:** not financial advice; no live-money trading - paper-only by
+default, no exceptions.
+
+## Lineage - the Storytold craft-app pattern
+
+Storytold ArtCraft ([storytold/artcraft](https://github.com/storytold/artcraft) - "the IDE for artists") was the starting point. The 16 craft apps in the Storytold stable each ship one binary that is both the human CLI and the agent MCP server (stdio), headless-first, with `run.json` + report artifacts. That modus operandi and harness is what this repo implements; the code here is independent, the pattern is shared.
