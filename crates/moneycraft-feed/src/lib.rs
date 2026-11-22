@@ -1210,10 +1210,7 @@ impl MarketFeed {
 
         let clamped_count = count.clamp(10, 180);
         let url = format!("https://api.binance.com/api/v3/klines?symbol={binance_pair}&interval=1h&limit={clamped_count}");
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_millis(3500))
-            .build()
-            .map_err(|e| format!("Client build error: {e}"))?;
+        let client = http_client(3500)?;
 
         let resp = client
             .get(&url)
@@ -1328,10 +1325,7 @@ impl MarketFeed {
         };
         let url = format!("https://query1.finance.yahoo.com/v8/finance/chart/{encoded_ticker}?interval=1h&range={range}");
 
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_millis(4000))
-            .build()
-            .map_err(|e| format!("Client build error: {e}"))?;
+        let client = http_client(4000)?;
 
         let resp = client
             .get(&url)
@@ -1422,10 +1416,7 @@ impl MarketFeed {
             _ => return Err("Asset not traded on Hyperliquid perpetual DEX".to_string()),
         };
 
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_millis(3500))
-            .build()
-            .map_err(|e| format!("Client build error: {e}"))?;
+        let client = http_client(3500)?;
 
         let body = serde_json::json!({
             "type": "metaAndAssetCtxs"
@@ -1506,10 +1497,7 @@ impl MarketFeed {
     /// FROM/TO pair as a cross via EUR: EUR/XXX = r(XXX),
     /// XXX/EUR = 1/r(XXX), XXX/YYY = r(YYY)/r(XXX).
     async fn fetch_ecb(symbol: &str) -> Result<f64, String> {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_millis(3500))
-            .build()
-            .map_err(|e| format!("Client build error: {e}"))?;
+        let client = http_client(3500)?;
 
         let resp = client
             .get("https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml")
@@ -1558,4 +1546,17 @@ impl MarketFeed {
         }
         Ok(quote_eur / base_eur)
     }
+}
+
+/// HTTP client with a request timeout on native targets. On wasm32 the browser's
+/// fetch owns timeouts, and reqwest's wasm ClientBuilder has no timeout setter.
+fn http_client(timeout_ms: u64) -> Result<reqwest::Client, String> {
+    let builder = reqwest::Client::builder();
+    #[cfg(not(target_arch = "wasm32"))]
+    let builder = builder.timeout(std::time::Duration::from_millis(timeout_ms));
+    #[cfg(target_arch = "wasm32")]
+    let _ = timeout_ms;
+    builder
+        .build()
+        .map_err(|e| format!("Client build error: {e}"))
 }
