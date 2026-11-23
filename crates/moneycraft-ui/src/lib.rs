@@ -1202,7 +1202,7 @@ impl MoneyCraftGui {
                                         ui.label(egui::RichText::new("CLI (moneycraft-cli <subcommand>)").strong());
                                         ui.code("moneycraft-cli status\nmoneycraft-cli universe\nmoneycraft-cli ticker EUR/USD --source yahoo\nmoneycraft-cli compare \"DJIA,SPX,KOSPI\" --bars 60\nmoneycraft-cli ledger-add SAP.DE --side BUY --quantity 10 --price 228 --venue flatex\nmoneycraft-cli ledger-valuation --source yahoo\nmoneycraft-cli broker-place --broker paper AAPL --dry-run");
                                         ui.add_space(6.0);
-                                        ui.label(egui::RichText::new("MCP 2024-11-05 Server (moneycraft-cli --mcp)").strong());
+                                        ui.label(egui::RichText::new("MCP 2026-07-28 Server (moneycraft-cli --mcp)").strong());
                                         ui.label("Exposes 28 tools (finance_status, finance_universe, finance_list_data_sources, finance_ticker, finance_compare, finance_derivatives, finance_news, finance_simulate_personal_wealth, finance_backtest, finance_ai_workflow, finance_audit_contract, finance_fx_convert, finance_brokers, finance_broker_place, finance_paper_*, finance_place_order, finance_ledger_*, finance_portfolio, moneycraft_skill_read) plus resources/list & resources/read.");
                                     }
                                     HelpTab::TipsTricks => {

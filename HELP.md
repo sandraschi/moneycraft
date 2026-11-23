@@ -30,7 +30,7 @@ MoneyCraft is structured as a 6-crate Rust workspace plus a WebAssembly build (`
 | `moneycraft-core` | Headless `Command::dispatch` bus, personal wealth projection engine, `ledger` FIFO SQLite module, `history` (19 panics & sovereign instruments), `i18n` (7 locales), and embedded `skills` + `HELP.md`. |
 | `moneycraft-feed` | Market data connectors (`yahoo`, `binance`, `hyperliquid`, `ecb`, `synthetic`), technical indicators (`SMA`, `EMA`, `Bollinger`, `RSI`), FX cross math, and sandbox EVM bytecode auditor. |
 | `moneycraft-broker` | `Broker` trait (`PaperBroker` only by default), risk/leverage limit validation, and `dry_run` order verification. |
-| `moneycraft-mcp` | Dual-mode binary (`moneycraft-cli`): human CLI subcommands and MCP `2024-11-05` `stdio` server (28 tools + `resources/list` / `resources/read` + `prompts/list`). |
+| `moneycraft-mcp` | Dual-mode binary (`moneycraft-cli`): human CLI subcommands and MCP `2026-07-28` `stdio` server (28 tools + `resources/list` / `resources/read` + `prompts/list`). |
 | `moneycraft-ui` | Shared `egui 0.37` terminal UI, universal 8-menu bar with `switch_on_hover`, `Ctrl+J` AI Chat Dock, and `tofu_guard`. |
 | `moneycraft-app` | Native desktop runner (`moneycraft`) with `--smoke` headless verification. |
 
@@ -68,7 +68,7 @@ cargo run -p moneycraft-mcp --bin moneycraft-cli -- ledger-valuation --source ya
 cargo run -p moneycraft-mcp --bin moneycraft-cli -- broker-place --broker paper AAPL --dry-run
 ```
 
-### MCP `2024-11-05` Server (`moneycraft-cli --mcp`)
+### MCP `2026-07-28` Server (`moneycraft-cli --mcp`)
 Line-delimited JSON-RPC over `stdio` (diagnostics on `stderr` only):
 - **Discovery & Market Tools**: `finance_status`, `finance_universe`, `finance_list_data_sources`, `finance_ticker`, `finance_compare`, `finance_derivatives`, `finance_news`, `finance_historic_panics`, `finance_historic_instruments`, `finance_fx_convert`.
 - **Analysis & Sandbox Tools**: `finance_simulate_personal_wealth`, `finance_backtest`, `finance_ai_workflow`, `finance_audit_contract`, `finance_brokers`, `finance_broker_place`, `finance_paper_account`, `finance_paper_open`, `finance_paper_close`, `finance_paper_reset`, `finance_place_order`.

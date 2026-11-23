@@ -1,6 +1,6 @@
 //! MoneyCraft MCP Server & Universal CLI.
 //!
-//! Follows the MCP 2024-11-05 standard: stdout is 100% JSON-RPC, diagnostics go to stderr.
+//! Follows the MCP 2026-07-28 standard: stdout is 100% JSON-RPC, diagnostics go to stderr.
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 #![deny(clippy::panic)]
@@ -22,7 +22,7 @@ use tokio::runtime::Runtime;
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
-    /// Run as MCP 2024-11-05 stdio server
+    /// Run as MCP 2026-07-28 stdio server
     #[arg(long)]
     mcp: bool,
 }
@@ -589,7 +589,7 @@ fn run_mcp_stdio(rt: &Runtime, store: &DatabaseStore) {
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": {
-                    "protocolVersion": "2024-11-05",
+                    "protocolVersion": "2026-07-28",
                     "capabilities": { "tools": {}, "prompts": {}, "resources": {} },
                     "serverInfo": { "name": "moneycraft-mcp", "version": APP_VERSION }
                 }
