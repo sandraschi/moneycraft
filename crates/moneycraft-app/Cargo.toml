@@ -1,5 +1,6 @@
 [package]
 name = "moneycraft-app"
+description = "MoneyCraft desktop app: the moneycraft-ui terminal in a native window"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,11 +11,7 @@ name = "moneycraft"
 path = "src/main.rs"
 
 [dependencies]
-moneycraft-core = { path = "../moneycraft-core" }
-moneycraft-feed = { path = "../moneycraft-feed" }
+moneycraft-ui = { path = "../moneycraft-ui" }
 databasecraft-store.workspace = true
-serde.workspace = true
-serde_json.workspace = true
 tokio.workspace = true
 eframe.workspace = true
-egui.workspace = true

@@ -1,0 +1,23 @@
+[package]
+name = "moneycraft-web"
+description = "MoneyCraft in the browser (eframe web runner, same terminal as the desktop app)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[[bin]]
+name = "moneycraft-web"
+path = "src/main.rs"
+
+[dependencies]
+moneycraft-ui = { path = "../../crates/moneycraft-ui" }
+databasecraft-store.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+eframe.workspace = true
+log = "0.4"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement"] }
