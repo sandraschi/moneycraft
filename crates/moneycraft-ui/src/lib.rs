@@ -29,6 +29,23 @@ pub use bridge::{Bridge, Reply};
 use chat_dock::{ChatContext, ChatDockState};
 use tofu_guard::check_string_for_tofu;
 
+/// Default persistent SQLite path for MoneyCraft (`$MONEYCRAFT_DB` or
+/// `%LOCALAPPDATA%/moneycraft/moneycraft.db`).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn default_db() -> std::path::PathBuf {
+    if let Ok(p) = std::env::var("MONEYCRAFT_DB") {
+        if !p.trim().is_empty() {
+            return std::path::PathBuf::from(p);
+        }
+    }
+    let dir = std::env::var("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join("moneycraft");
+    let _ = std::fs::create_dir_all(&dir);
+    dir.join("moneycraft.db")
+}
+
 /// Help Center tabs for the standardized Craft Help dialog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HelpTab {
@@ -333,15 +350,30 @@ impl MoneyCraftGui {
         app
     }
 
-    /// Open MoneyCraft for embedding inside a host suite (e.g. SMBCraft).
-    /// Runs local wealth simulation and portfolio ledger immediately without blocking
-    /// on live network feeds until the user opens or refreshes market tabs.
+    /// Open MoneyCraft for embedding inside a host suite (e.g. SMBCraft), using
+    /// an in-memory SQLite store.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn open_embedded() -> Result<Self, String> {
+        Self::open_embedded_at(None)
+    }
+
+    /// Open MoneyCraft for embedding inside a host suite, optionally backed by a
+    /// persistent SQLite database file on disk.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn open_embedded_at(db_path: Option<&std::path::Path>) -> Result<Self, String> {
         let rt = tokio::runtime::Runtime::new()
             .map_err(|e| format!("Failed to create Tokio runtime: {e}"))?;
-        let store = DatabaseStore::open_in_memory()
-            .map_err(|e| format!("Failed to initialize SQLite store: {e}"))?;
+        let store = match db_path {
+            Some(path) => {
+                if let Some(parent) = path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                DatabaseStore::open(path)
+                    .map_err(|e| format!("Failed to open MoneyCraft DB {}: {e}", path.display()))?
+            }
+            None => DatabaseStore::open_in_memory()
+                .map_err(|e| format!("Failed to initialize SQLite store: {e}"))?,
+        };
         let bridge = Bridge::native(Arc::new(store), Arc::new(rt));
         let default_wealth_cfg = PersonalWealthConfig {
             monthly_income_eur: 2000.0,
