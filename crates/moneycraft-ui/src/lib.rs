@@ -333,6 +333,171 @@ impl MoneyCraftGui {
         app
     }
 
+    /// Open MoneyCraft for embedding inside a host suite (e.g. SMBCraft).
+    /// Runs local wealth simulation and portfolio ledger immediately without blocking
+    /// on live network feeds until the user opens or refreshes market tabs.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn open_embedded() -> Result<Self, String> {
+        let rt = tokio::runtime::Runtime::new()
+            .map_err(|e| format!("Failed to create Tokio runtime: {e}"))?;
+        let store = DatabaseStore::open_in_memory()
+            .map_err(|e| format!("Failed to initialize SQLite store: {e}"))?;
+        let bridge = Bridge::native(Arc::new(store), Arc::new(rt));
+        let default_wealth_cfg = PersonalWealthConfig {
+            monthly_income_eur: 2000.0,
+            monthly_living_costs_eur: 1400.0,
+            checking_balance_eur: 4200.0,
+            festgeld_principal_eur: 15000.0,
+            festgeld_interest_rate_pct: 3.0,
+            festgeld_term_years: 3.0,
+            bausparer_monthly_deposit_eur: 100.0,
+            bausparer_balance_eur: 5400.0,
+            bausparer_interest_rate_pct: 1.5,
+            inflation_run_rate_pct: 3.8,
+            simulation_years: 5,
+        };
+        let mut app = Self {
+            store: Arc::clone(bridge.store()),
+            bridge,
+            active_workspace: ActiveWorkspace::PersonalWealth,
+            selected_symbol: "DJIA".to_string(),
+            command_input: String::new(),
+            wealth_config: default_wealth_cfg,
+            wealth_report: None,
+            active_data_source: "yahoo".to_string(),
+            custom_ticker: String::new(),
+            forex_from: "EUR".to_string(),
+            forex_to: "USD".to_string(),
+            chart_style: ChartStyle::Candlestick,
+            date_preset: DateRangePreset::Month1,
+            custom_bar_count: 60,
+            chart_zoom_bars: None,
+            show_sma20: true,
+            show_ema50: true,
+            show_bollinger: true,
+            show_volume: true,
+            show_rsi: true,
+            show_historic_panics: true,
+            locale: moneycraft_core::i18n::AppLocale::En,
+            comparison_symbols: vec![
+                "DJIA".to_string(),
+                "SPX".to_string(),
+                "KOSPI".to_string(),
+                "DAX".to_string(),
+            ],
+            comparison_data: None,
+            news_index: 0,
+            news_data: None,
+            derivatives_data: None,
+            paper_account: None,
+            paper_order_side: "LONG".to_string(),
+            paper_order_type: "PERP_FUTURES".to_string(),
+            paper_leverage: 10.0,
+            paper_quantity: 0.5,
+            ai_mode: AiWorkflowMode::StrategyGen,
+            ai_prompt: "Develop a momentum breakout strategy with mean-reversion Bollinger bands on KOSPI vs DJIA".to_string(),
+            ai_result: None,
+            audit_address: "0x123_scam_token_trap".to_string(),
+            audit_chain: "Ethereum".to_string(),
+            strategy_name: "BollingerBreakout_v2".to_string(),
+            initial_capital: 100_000.0,
+            market_data: None,
+            audit_report: None,
+            backtest_result: None,
+            portfolio_data: None,
+            status_message: "MoneyCraft ready (embedded mode).".to_string(),
+            is_dark_theme: true,
+            show_about_dialog: false,
+            show_auth_modal: false,
+            is_authenticated: false,
+            auth_username: "Sandra_Desk_01".to_string(),
+            auth_input_user: "sandra".to_string(),
+            auth_input_pass: String::new(),
+            active_dialog: None,
+            help_tab: HelpTab::GettingStarted,
+            selected_skill_idx: 0,
+            chat_dock: ChatDockState::default(),
+            command_palette_query: String::new(),
+            show_ticker_ribbon: true,
+            show_news_wire: true,
+            show_nav_rail: true,
+            show_status_bar: true,
+        };
+        app.run_wealth_simulation();
+        app.fetch_portfolio();
+        Ok(app)
+    }
+
+    pub fn set_workspace(&mut self, ws: ActiveWorkspace) {
+        self.active_workspace = ws;
+    }
+
+    pub fn set_lang_de(&mut self, de: bool) {
+        self.locale = if de {
+            moneycraft_core::i18n::AppLocale::De
+        } else {
+            moneycraft_core::i18n::AppLocale::En
+        };
+    }
+
+    /// Render the MoneyCraft workspaces inside a host panel (e.g. SMBCraft) without
+    /// overriding host visuals or allocating top-level window panels.
+    pub fn render_embedded(&mut self, ui: &mut egui::Ui) {
+        self.drain_replies();
+        ui.horizontal_wrapped(|ui| {
+            let tabs = [
+                (ActiveWorkspace::PersonalWealth, "Personal Wealth"),
+                (ActiveWorkspace::PortfolioLedger, "Portfolio Ledger"),
+                (ActiveWorkspace::Terminal, "Terminal"),
+                (ActiveWorkspace::MultiComparison, "Multi-Compare"),
+                (ActiveWorkspace::DataSources, "Data Sources"),
+                (ActiveWorkspace::CryptoDerivatives, "Derivatives"),
+                (ActiveWorkspace::FantasyTrading, "Paper Trade"),
+                (ActiveWorkspace::AiWorkflows, "AI Workflows"),
+                (ActiveWorkspace::HoneypotAuditor, "Auditor"),
+                (ActiveWorkspace::Backtester, "Backtester"),
+                (ActiveWorkspace::Help, "Help"),
+            ];
+            for (ws, label) in tabs {
+                if ui.selectable_label(self.active_workspace == ws, label).clicked() {
+                    self.active_workspace = ws;
+                    match ws {
+                        ActiveWorkspace::Terminal if self.market_data.is_none() => {
+                            self.fetch_market_feed();
+                        }
+                        ActiveWorkspace::MultiComparison if self.comparison_data.is_none() => {
+                            self.fetch_multi_comparison();
+                        }
+                        ActiveWorkspace::CryptoDerivatives if self.derivatives_data.is_none() => {
+                            self.fetch_derivatives();
+                        }
+                        ActiveWorkspace::FantasyTrading if self.paper_account.is_none() => {
+                            self.fetch_paper_account();
+                        }
+                        ActiveWorkspace::PortfolioLedger if self.portfolio_data.is_none() => {
+                            self.fetch_portfolio();
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        });
+        ui.separator();
+        match self.active_workspace {
+            ActiveWorkspace::PersonalWealth => self.render_personal_wealth(ui),
+            ActiveWorkspace::Terminal => self.render_bloomberg_terminal(ui),
+            ActiveWorkspace::DataSources => self.render_data_sources_and_payola(ui),
+            ActiveWorkspace::MultiComparison => self.render_multi_comparison(ui),
+            ActiveWorkspace::CryptoDerivatives => self.render_crypto_derivatives(ui),
+            ActiveWorkspace::FantasyTrading => self.render_fantasy_trading(ui),
+            ActiveWorkspace::AiWorkflows => self.render_ai_workflows(ui),
+            ActiveWorkspace::HoneypotAuditor => self.render_honeypot_auditor(ui),
+            ActiveWorkspace::Backtester => self.render_backtester(ui),
+            ActiveWorkspace::PortfolioLedger => self.render_portfolio_ledger(ui),
+            ActiveWorkspace::Help => self.render_help(ui),
+        }
+    }
+
     pub fn run_wealth_simulation(&mut self) {
         let rep = compute_personal_wealth_projection(&self.wealth_config);
         self.wealth_report = Some(serde_json::to_value(&rep).unwrap_or(Value::Null));
@@ -2642,7 +2807,7 @@ impl MoneyCraftGui {
         let cyan = theme_cyan(ui);
 
         ui.heading(
-            egui::RichText::new("💶 PERSONAL WEALTH, SAVINGS & INFLATION EROSION SIMULATOR")
+            egui::RichText::new("PERSONAL WEALTH, SAVINGS & INFLATION EROSION SIMULATOR")
                 .color(amber),
         );
         ui.label("Money for beginners: Visualize how inflation silently eats cash across checking accounts, fixed deposits, and Bausparer:");
@@ -2854,7 +3019,7 @@ impl MoneyCraftGui {
                     .fill(ui.visuals().faint_bg_color)
                     .stroke(egui::Stroke::new(1.5, theme_red()))
                     .show(ui, |ui| {
-                    ui.colored_label(red, egui::RichText::new(format!("⚠️ INFLATION WARNING: Your capital is losing purchasing power at {net_real_yield:.2}% per year.")).strong());
+                    ui.colored_label(red, egui::RichText::new(format!("INFLATION WARNING: Your capital is losing purchasing power at {net_real_yield:.2}% per year.")).strong());
                     ui.label(format!("At this run-rate, your money's real purchasing power will be cut in half in {halve_years:.1} years (Rule of 72)."));
                     ui.label("Your 3% Festgeld sounds safe, but inflation (3.8%) means you are guaranteed to end up poorer in real terms.");
                 });
@@ -4824,7 +4989,7 @@ impl MoneyCraftGui {
         let green = theme_green(ui);
         let red = theme_red();
 
-        ui.heading(egui::RichText::new("💼 SOVEREIGN PORTFOLIO LEDGER").color(amber));
+        ui.heading(egui::RichText::new("SOVEREIGN PORTFOLIO LEDGER").color(amber));
         ui.label("Your real holdings - FIFO cost basis, live valuation, Austrian KESt estimate. No crypto, no mannequins.");
 
         ui.add_space(8.0);

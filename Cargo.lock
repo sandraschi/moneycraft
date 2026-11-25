@@ -850,20 +850,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 
 [[package]]
-name = "databasecraft-core"
-version = "0.5.0"
-dependencies = [
- "chrono",
- "databasecraft-store",
- "serde",
- "serde_json",
- "tokio",
- "uuid",
-]
-
-[[package]]
 name = "databasecraft-store"
-version = "0.5.0"
+version = "0.7.0"
 dependencies = [
  "chrono",
  "rusqlite",
@@ -2078,9 +2066,9 @@ dependencies = [
 
 [[package]]
 name = "libsqlite3-sys"
-version = "0.38.2"
+version = "0.40.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1d20bef17f513b9b3004532233187769cd072d790971f4e4da0e346eb6401e8"
+checksum = "b06e69070b7e12262b0cd90832f0a7396f142a2b330181255562decf9f0c6215"
 dependencies = [
  "cc",
  "pkg-config",
@@ -2199,11 +2187,7 @@ version = "0.7.0"
 dependencies = [
  "databasecraft-store",
  "eframe",
- "egui",
- "moneycraft-core",
- "moneycraft-feed",
- "serde",
- "serde_json",
+ "moneycraft-ui",
  "tokio",
 ]
 
@@ -2221,7 +2205,6 @@ name = "moneycraft-core"
 version = "0.7.0"
 dependencies = [
  "chrono",
- "databasecraft-core",
  "databasecraft-store",
  "moneycraft-broker",
  "moneycraft-feed",
@@ -2229,6 +2212,7 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
+ "web-time",
 ]
 
 [[package]]
@@ -2239,7 +2223,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
- "tokio",
 ]
 
 [[package]]
@@ -2253,6 +2236,34 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "moneycraft-ui"
+version = "0.7.0"
+dependencies = [
+ "databasecraft-store",
+ "eframe",
+ "egui",
+ "moneycraft-core",
+ "moneycraft-feed",
+ "serde",
+ "serde_json",
+ "tokio",
+ "wasm-bindgen-futures",
+]
+
+[[package]]
+name = "moneycraft-web"
+version = "0.7.0"
+dependencies = [
+ "databasecraft-store",
+ "eframe",
+ "log",
+ "moneycraft-ui",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
@@ -3279,19 +3290,18 @@ dependencies = [
 
 [[package]]
 name = "rsqlite-vfs"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c51c9ae4df8a7fba42103df5c621fa3c37eccf3a3c650879e90fc48b11cc192c"
+checksum = "353b74f9810d5b085b6c42c9d86a5f0fdb795553235cdd48753b32e3809d18a7"
 dependencies = [
- "hashbrown 0.16.1",
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "rusqlite"
-version = "0.40.2"
+version = "0.43.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23f2a97da3e3873c73cb2a2e71b35c40ff95e0b1eefa8d72d8499a6928c3b5b3"
+checksum = "f172c4812a19b26d1c23cdb0070e69db335503dfa378b910eb857386e5b8beba"
 dependencies = [
  "bitflags 2.13.2",
  "fallible-iterator",
@@ -3682,14 +3692,12 @@ dependencies = [
 
 [[package]]
 name = "sqlite-wasm-rs"
-version = "0.5.5"
+version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc3efc0da82635d7e1ced0053bbbfa8c7ab9645d0bf36ceb4f7127bb85315d75"
+checksum = "a6cd504cecbfe7eef649988840f9a6cb768d11085efec138f8e99f160632d867"
 dependencies = [
  "cc",
- "js-sys",
  "rsqlite-vfs",
- "wasm-bindgen",
 ]
 
 [[package]]
@@ -4157,7 +4165,6 @@ version = "1.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a0e2d11620c50695fe12bbbfde96b3477fe606e7284c22d505c12ce51214514"
 dependencies = [
- "getrandom 0.4.3",
  "js-sys",
  "serde_core",
  "wasm-bindgen",
