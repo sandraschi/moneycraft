@@ -475,6 +475,7 @@ impl MoneyCraftGui {
     /// Render the MoneyCraft workspaces inside a host panel (e.g. SMBCraft) without
     /// overriding host visuals or allocating top-level window panels.
     pub fn render_embedded(&mut self, ui: &mut egui::Ui) {
+        self.is_dark_theme = ui.visuals().dark_mode;
         self.drain_replies();
         ui.horizontal_wrapped(|ui| {
             let tabs = [
