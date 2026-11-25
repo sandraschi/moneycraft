@@ -3065,46 +3065,53 @@ impl MoneyCraftGui {
                     .color(amber),
             );
             if let Some(proj) = rep_val["projections"].as_array() {
-                egui::Grid::new("wealth_proj_grid")
-                    .striped(true)
-                    .min_col_width(95.0)
+                egui::ScrollArea::horizontal()
+                    .id_salt("wealth_proj_hscroll")
                     .show(ui, |ui| {
-                        ui.strong("Year");
-                        ui.strong("Checking");
-                        ui.strong("Festgeld");
-                        ui.strong("Bausparer");
-                        ui.strong("Nominal Total (Bank App)");
-                        ui.strong("Real Value (True Goods)");
-                        ui.strong("Silent Inflation Loss");
-                        ui.strong("Value Kept");
-                        ui.strong("Real Monthly Income");
-                        ui.end_row();
+                        egui::Grid::new("wealth_proj_grid")
+                            .striped(true)
+                            .min_col_width(90.0)
+                            .show(ui, |ui| {
+                                ui.strong("Year");
+                                ui.strong("Checking");
+                                ui.strong("Festgeld");
+                                ui.strong("Bausparer");
+                                ui.strong("Nominal Total");
+                                ui.strong("Real Value");
+                                ui.strong("Inflation Loss");
+                                ui.strong("Value Kept");
+                                ui.strong("Real Monthly");
+                                ui.end_row();
 
-                        for p in proj {
-                            let y = p["year"].as_u64().unwrap_or(0);
-                            let chk = p["checking_eur"].as_f64().unwrap_or(0.0);
-                            let fest = p["festgeld_nominal_eur"].as_f64().unwrap_or(0.0);
-                            let bau = p["bausparer_nominal_eur"].as_f64().unwrap_or(0.0);
-                            let nom = p["total_nominal_wealth_eur"].as_f64().unwrap_or(0.0);
-                            let real = p["total_real_wealth_eur"].as_f64().unwrap_or(0.0);
-                            let loss = p["cumulative_inflation_loss_eur"].as_f64().unwrap_or(0.0);
-                            let ret = p["purchasing_power_retention_pct"].as_f64().unwrap_or(0.0);
-                            let m_real = p["monthly_purchasing_power_eur"].as_f64().unwrap_or(0.0);
+                                for p in proj {
+                                    let y = p["year"].as_u64().unwrap_or(0);
+                                    let chk = p["checking_eur"].as_f64().unwrap_or(0.0);
+                                    let fest = p["festgeld_nominal_eur"].as_f64().unwrap_or(0.0);
+                                    let bau = p["bausparer_nominal_eur"].as_f64().unwrap_or(0.0);
+                                    let nom = p["total_nominal_wealth_eur"].as_f64().unwrap_or(0.0);
+                                    let real = p["total_real_wealth_eur"].as_f64().unwrap_or(0.0);
+                                    let loss =
+                                        p["cumulative_inflation_loss_eur"].as_f64().unwrap_or(0.0);
+                                    let ret =
+                                        p["purchasing_power_retention_pct"].as_f64().unwrap_or(0.0);
+                                    let m_real =
+                                        p["monthly_purchasing_power_eur"].as_f64().unwrap_or(0.0);
 
-                            ui.label(format!("Year {y}"));
-                            ui.label(format!("{chk:.0} €"));
-                            ui.label(format!("{fest:.0} €"));
-                            ui.label(format!("{bau:.0} €"));
-                            ui.colored_label(cyan, format!("{nom:.0} €"));
-                            ui.colored_label(
-                                if real >= nom * 0.9 { green } else { amber },
-                                format!("{real:.0} €"),
-                            );
-                            ui.colored_label(red, format!("-{loss:.0} €"));
-                            ui.label(format!("{ret:.1}%"));
-                            ui.label(format!("{m_real:.0} €/mo"));
-                            ui.end_row();
-                        }
+                                    ui.label(format!("Year {y}"));
+                                    ui.label(format!("{chk:.0} €"));
+                                    ui.label(format!("{fest:.0} €"));
+                                    ui.label(format!("{bau:.0} €"));
+                                    ui.colored_label(cyan, format!("{nom:.0} €"));
+                                    ui.colored_label(
+                                        if real >= nom * 0.9 { green } else { amber },
+                                        format!("{real:.0} €"),
+                                    );
+                                    ui.colored_label(red, format!("-{loss:.0} €"));
+                                    ui.label(format!("{ret:.1}%"));
+                                    ui.label(format!("{m_real:.0} €/mo"));
+                                    ui.end_row();
+                                }
+                            });
                     });
             }
 
@@ -3115,7 +3122,7 @@ impl MoneyCraftGui {
                     .color(green),
             );
             if let Some(tips) = rep_val["inflation_antidotes"].as_array() {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     for t in tips {
                         let title = t["title"].as_str().unwrap_or("");
                         let cat = t["category"].as_str().unwrap_or("");
@@ -3123,17 +3130,22 @@ impl MoneyCraftGui {
                         let net_y = t["projected_real_yield_pct"].as_f64().unwrap_or(0.0);
 
                         egui::Frame::group(ui.style()).show(ui, |ui| {
-                            ui.set_max_width(260.0);
-                            ui.label(
-                                egui::RichText::new(format!("[{cat}]"))
-                                    .color(amber)
-                                    .monospace(),
-                            );
-                            ui.strong(title);
-                            ui.label(exp);
-                            ui.separator();
-                            let col = if net_y >= 0.0 { green } else { red };
-                            ui.colored_label(col, format!("Estimated Real Yield: {net_y:+.1}%"));
+                            ui.vertical(|ui| {
+                                ui.set_max_width(280.0);
+                                ui.label(
+                                    egui::RichText::new(format!("[{cat}]"))
+                                        .color(amber)
+                                        .monospace(),
+                                );
+                                ui.strong(title);
+                                ui.label(exp);
+                                ui.separator();
+                                let col = if net_y >= 0.0 { green } else { red };
+                                ui.colored_label(
+                                    col,
+                                    format!("Estimated Real Yield: {net_y:+.1}%"),
+                                );
+                            });
                         });
                     }
                 });
