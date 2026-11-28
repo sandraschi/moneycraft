@@ -492,7 +492,10 @@ impl MoneyCraftGui {
                 (ActiveWorkspace::Help, "Help"),
             ];
             for (ws, label) in tabs {
-                if ui.selectable_label(self.active_workspace == ws, label).clicked() {
+                if ui
+                    .selectable_label(self.active_workspace == ws, label)
+                    .clicked()
+                {
                     self.active_workspace = ws;
                     match ws {
                         ActiveWorkspace::Terminal if self.market_data.is_none() => {

@@ -1,0 +1,11 @@
+# Browser build. From this folder: `trunk serve` (dev) or `trunk build --release`.
+# From the repo root: `just web` / `just web-build` (sets the clang path sqlite-wasm needs).
+[build]
+target = "index.html"
+dist = "../../dist/web"
+public_url = "./"
+filehash = true
+
+[serve]
+addresses = ["127.0.0.1"]
+port = 11271
